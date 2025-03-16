@@ -76,6 +76,12 @@ Creates a new JIRA ticket.
 - `issue_type`: The type of issue (`Bug`, `Task`, or `Story`, defaults to `Task`)
 - `description`: Detailed description of the ticket (optional)
 
+### read-ticket
+
+Retrieves the details of an existing JIRA ticket.
+**Parameters:**
+- `ticket_id`: The ID of the JIRA ticket you want to read (required)
+
 ## Usage with Claude
 
 Once configured properly, you can ask Claude to create JIRA tickets directly:

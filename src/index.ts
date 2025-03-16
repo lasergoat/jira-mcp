@@ -26,8 +26,7 @@ server.tool(
         description: z.string().optional()
     },
     async ({ summary, issue_type, description }) => {
-
-        const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/2/issue`;
+        const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue`;
         const auth = Buffer.from(`${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`).toString('base64');
 
         const payload = {
@@ -77,6 +76,75 @@ server.tool(
         };
     },
 );
+
+server.tool(
+    "get-ticket",
+    "Get a jira ticket",
+    {
+        ticket_id: z.string().min(1, "Ticket ID is required")
+    },
+    async ({ ticket_id }) => {
+        const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticket_id}`;
+        const auth = Buffer.from(`${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`).toString('base64');
+        const response = await fetch(jiraUrl, {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+                'Authorization': `Basic ${auth}`
+            }
+        });
+
+        type JiraResponse = {
+            errorMessages?: string[];
+            fields?: {
+                summary: string;
+                description?: string;
+                issuetype: {
+                    name: string;
+                };
+                status?: {
+                    name: string;
+                };
+                priority?: {
+                    name: string;
+                };
+            };
+        };
+
+        const responseData = await response.json() as JiraResponse;
+        if (!response.ok) {
+            console.error("Error fetching ticket:", responseData);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error fetching ticket: ${responseData.errorMessages?.join(", ") || "Unknown error"}`
+                    }
+                ]
+            }
+        }
+
+        if (!responseData.fields) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: "Error: No ticket fields found in response"
+                    }
+                ]
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `JIRA Ticket: ${ticket_id}, Fields: ${JSON.stringify(responseData.fields, null, 2)}`
+                }
+            ]
+        };
+    }
+)
 
 async function main() {
     try {
