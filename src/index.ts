@@ -1,16 +1,14 @@
 import dotenv from "dotenv";
-// Load environment variables from .env file
 dotenv.config();
-console.error("[", Date.now(), "]JIRA_USERNAME: ", process.env.JIRA_USERNAME);
-console.error("JIRA_API_KEY: ", process.env.JIRA_API_KEY);
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import fetch from "node-fetch";
 
 process.on('uncaughtException', (error) => {
     console.error('UNCAUGHT EXCEPTION:', error);
-  });
+});
 
 // Create server instance
 const server = new McpServer({
@@ -24,20 +22,56 @@ server.tool(
     "Create a jira ticket",
     {
         summary: z.string().min(1, "Summary is required"),
-        description: z.string().optional(),
-        story_points: z.number().min(0, "Story points must be at least 0").optional()
+        issue_type: z.enum(["Bug", "Task", "Story"]).default("Task"),
+        description: z.string().optional()
     },
-    async ({ summary, description, story_points }) => {
-        // TODO: create jira ticket
+    async ({ summary, issue_type, description }) => {
 
+        const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/2/issue`;
+        const auth = Buffer.from(`${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`).toString('base64');
 
+        const payload = {
+            fields: {
+                project: {
+                    key: process.env.JIRA_PROJECT_KEY || "SCRUM"
+                },
+                summary: summary,
+                description: description || "No description provided",
+                issuetype: {
+                    name: issue_type
+                }
+            }
+        };
+
+        const response = await fetch(jiraUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                'Authorization': `Basic ${auth}`
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const responseData = await response.json() as { errorMessages?: string[] };
+
+        if (!response.ok) {
+            console.error("Error creating ticket:", responseData);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error creating ticket: ${responseData.errorMessages?.join(", ") || "Unknown error"}`
+                    }
+                ]
+            }
+        }
 
 
         return {
             content: [
                 {
                     type: "text",
-                    text: `Created ticket with summary: ${summary}, description: ${description || "No description"}, story points: ${story_points || 0}, JIRA userame: ${process.env.JIRA_USERNAME}`
+                    text: `Created ticket with summary: ${summary}, description: ${description || "No description"}, issue type: ${issue_type}.`
                 }
             ]
         };
