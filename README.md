@@ -2,6 +2,7 @@
 
 A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol) server for integrating JIRA with Claude. This tool allows Claude to create JIRA tickets directly within your conversations.
 
+
 ## Features
 
 - Create JIRA tickets with summary, description, and issue type
@@ -12,7 +13,7 @@ A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol
 
 1. Clone the repository:
    ```
-   git clone https://github.com/username/jira-mcp.git
+   git clone https://github.com/MankowskiNick/jira-mcp.git
    cd jira-mcp
    ```
 
