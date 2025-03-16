@@ -1,9 +1,12 @@
+import dotenv from "dotenv";
+// Load environment variables from .env file
+dotenv.config();
+console.error("[", Date.now(), "]JIRA_USERNAME: ", process.env.JIRA_USERNAME);
+console.error("JIRA_API_KEY: ", process.env.JIRA_API_KEY);
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-
-const NWS_API_BASE = "https://api.weather.gov";
-const USER_AGENT = "weather-app/1.0";
 
 process.on('uncaughtException', (error) => {
     console.error('UNCAUGHT EXCEPTION:', error);
@@ -11,132 +14,40 @@ process.on('uncaughtException', (error) => {
 
 // Create server instance
 const server = new McpServer({
-  name: "weather",
+  name: "jira-mcp",
   version: "1.0.0",
 });
 
-// Helper function for making NWS API requests
-async function makeNWSRequest<T>(url: string): Promise<T | null> {
-    const headers = {
-      "User-Agent": USER_AGENT,
-      Accept: "application/geo+json",
-    };
-  
-    try {
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return (await response.json()) as T;
-    } catch (error) {
-      console.error("Error making NWS request:", error);
-      return null;
-    }
-  }
-  
-  interface AlertFeature {
-    properties: {
-      event?: string;
-      areaDesc?: string;
-      severity?: string;
-      status?: string;
-      headline?: string;
-    };
-  }
-  
-  // Format alert data
-  function formatAlert(feature: AlertFeature): string {
-    const props = feature.properties;
-    return [
-      `Event: ${props.event || "Unknown"}`,
-      `Area: ${props.areaDesc || "Unknown"}`,
-      `Severity: ${props.severity || "Unknown"}`,
-      `Status: ${props.status || "Unknown"}`,
-      `Headline: ${props.headline || "No headline"}`,
-      "---",
-    ].join("\n");
-  }
-  
-  interface ForecastPeriod {
-    name?: string;
-    temperature?: number;
-    temperatureUnit?: string;
-    windSpeed?: string;
-    windDirection?: string;
-    shortForecast?: string;
-  }
-  
-  interface AlertsResponse {
-    features: AlertFeature[];
-  }
-  
-  interface PointsResponse {
-    properties: {
-      forecast?: string;
-    };
-  }
-  
-  interface ForecastResponse {
-    properties: {
-      periods: ForecastPeriod[];
-    };
-  }
-
-  // Register weather tools
+// Register weather tools
 server.tool(
-    "get-alerts",
-    "Get weather alerts for a state",
+    "create-ticket",
+    "Create a jira ticket",
     {
-      state: z.string().length(2).describe("Two-letter state code (e.g. CA, NY)"),
+        summary: z.string().min(1, "Summary is required"),
+        description: z.string().optional(),
+        story_points: z.number().min(0, "Story points must be at least 0").optional()
     },
-    async ({ state }) => {
-      const stateCode = state.toUpperCase();
-      const alertsUrl = `${NWS_API_BASE}/alerts?area=${stateCode}`;
-      const alertsData = await makeNWSRequest<AlertsResponse>(alertsUrl);
-  
-      if (!alertsData) {
+    async ({ summary, description, story_points }) => {
+        // TODO: create jira ticket
+
+
+
+
         return {
-          content: [
-            {
-              type: "text",
-              text: "Failed to retrieve alerts data",
-            },
-          ],
+            content: [
+                {
+                    type: "text",
+                    text: `Created ticket with summary: ${summary}, description: ${description || "No description"}, story points: ${story_points || 0}, JIRA userame: ${process.env.JIRA_USERNAME}`
+                }
+            ]
         };
-      }
-  
-      const features = alertsData.features || [];
-      if (features.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `No active alerts for ${stateCode}`,
-            },
-          ],
-        };
-      }
-  
-      const formattedAlerts = features.map(formatAlert);
-      const alertsText = `Active alerts for ${stateCode}:\n\n${formattedAlerts.join("\n")}`;
-  
-      return {
-        content: [
-          {
-            type: "text",
-            text: alertsText,
-          },
-        ],
-      };
     },
 );
 
 async function main() {
     try {
         const transport = new StdioServerTransport();
-        console.error("Connecting to transport...");
         await server.connect(transport);
-        console.error("Weather MCP Server running on stdio");
     } catch (error) {
         console.error("Error in main():", error);
         process.exit(1);
