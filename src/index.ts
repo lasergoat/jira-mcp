@@ -82,11 +82,19 @@ server.tool(
             id: "18852",
           },
         ],
-        customfield_10636: {
-          self: "https://3eco.atlassian.net/rest/api/3/customFieldOption/18384",
-          value: "Non-CPP",
-          id: "18384",
-        },
+        // Use CPP by default, but allow override via environment variable
+        customfield_10636:
+          process.env.USE_NON_CPP === "true"
+            ? {
+                self: "https://3eco.atlassian.net/rest/api/3/customFieldOption/18384",
+                value: "Non-CPP",
+                id: "18384",
+              }
+            : {
+                self: "https://3eco.atlassian.net/rest/api/3/customFieldOption/18383",
+                value: "CPP",
+                id: "18383",
+              },
       },
     };
 
