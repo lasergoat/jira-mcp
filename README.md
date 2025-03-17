@@ -14,12 +14,14 @@ A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol
 ## Installation
 
 1. Clone the repository:
+
    ```
    git clone https://github.com/MankowskiNick/jira-mcp.git
    cd jira-mcp
    ```
 
 2. Install dependencies:
+
    ```
    npm install
    ```
@@ -34,6 +36,7 @@ A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol
 ### Claude Desktop Configuration
 
 Add the JIRA MCP server configuration to your `claude_desktop_config.json` file. This file is typically located at:
+
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Roaming\Claude\claude_desktop_config.json`
 
@@ -44,14 +47,13 @@ Add the following configuration to the file:
   "mcpServers": {
     "jira-mcp": {
       "command": "node",
-      "args": [
-        "/path/to/project/build/index.js"
-      ],
+      "args": ["/path/to/project/build/index.js"],
       "env": {
         "JIRA_HOST": "your-site.atlassian.net",
         "JIRA_USERNAME": "your-email@example.com",
         "JIRA_API_TOKEN": "your_api_token",
-        "JIRA_PROJECT_KEY": "your_project_key"
+        "JIRA_PROJECT_KEY": "your_project_key",
+        "USE_NON_CPP": "false"
       }
     }
   }
@@ -59,11 +61,13 @@ Add the following configuration to the file:
 ```
 
 Replace the placeholder values with your actual JIRA information:
+
 - `/path/to/project/build/index.js`: Full path to the built index.js file
 - `JIRA_HOST`: Your JIRA instance domain (e.g., `company.atlassian.net`)
 - `JIRA_USERNAME`: Your JIRA username (usually your email address)
 - `JIRA_API_TOKEN`: Your JIRA API token (see below for how to get this)
 - `JIRA_PROJECT_KEY`: The key for your JIRA project (e.g., `SCRUM`, `DEV`, etc.)
+- `USE_NON_CPP`: Set to "true" to use "Non-CPP" for the customfield_10636 field, or "false" (default) to use "CPP"
 
 ## Available Tools
 
@@ -72,6 +76,7 @@ Replace the placeholder values with your actual JIRA information:
 Creates a new JIRA ticket.
 
 **Parameters:**
+
 - `summary`: The title/summary of the ticket (required)
 - `issue_type`: The type of issue (`Bug`, `Task`, or `Story`, defaults to `Task`)
 - `description`: Detailed description of the ticket (optional)
@@ -80,6 +85,7 @@ Creates a new JIRA ticket.
 
 Retrieves the details of an existing JIRA ticket.
 **Parameters:**
+
 - `ticket_id`: The ID of the JIRA ticket you want to read (required)
 
 ## Usage with Claude
