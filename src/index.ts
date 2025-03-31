@@ -115,6 +115,8 @@ server.tool(
     const responseData = (await response.json()) as {
       errorMessages?: string[];
       errors?: Record<string, string>;
+      key?: string; // Add key field to capture the ticket number
+      id?: string;
     };
 
     if (!response.ok) {
@@ -145,11 +147,14 @@ server.tool(
       };
     }
 
+    // Extract the ticket key/number from the response
+    const ticketKey = responseData.key;
+
     return {
       content: [
         {
           type: "text",
-          text: `Created ticket with summary: ${summary}, description: ${
+          text: `Created ticket ${ticketKey} with summary: ${summary}, description: ${
             description || "No description"
           }, issue type: ${issue_type}.`,
         },
