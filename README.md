@@ -8,6 +8,8 @@ A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol
 ## Features
 
 - Create JIRA tickets with summary, description, and issue type
+- Assign story points to Story tickets
+- Automatically create linked Test tickets for Stories with points
 - Seamless integration with Claude desktop application
 - Simple configuration using Claude's desktop configuration file
 
@@ -53,7 +55,8 @@ Add the following configuration to the file:
         "JIRA_USERNAME": "your-email@example.com",
         "JIRA_API_TOKEN": "your_api_token",
         "JIRA_PROJECT_KEY": "your_project_key",
-        "USE_NON_CPP": "false"
+        "USE_NON_CPP": "false",
+        "AUTO_CREATE_TEST_TICKETS": "true"
       }
     }
   }
@@ -68,6 +71,7 @@ Replace the placeholder values with your actual JIRA information:
 - `JIRA_API_TOKEN`: Your JIRA API token (see below for how to get this)
 - `JIRA_PROJECT_KEY`: The key for your JIRA project (e.g., `SCRUM`, `DEV`, etc.)
 - `USE_NON_CPP`: Set to "true" to use "Non-CPP" for the customfield_10636 field, or "false" (default) to use "CPP"
+- `AUTO_CREATE_TEST_TICKETS`: Set to "true" (default) to automatically create linked Test tickets for Story tickets with points, or "false" to disable this feature
 
 ## Available Tools
 
@@ -80,6 +84,16 @@ Creates a new JIRA ticket.
 - `summary`: The title/summary of the ticket (required)
 - `issue_type`: The type of issue (`Bug`, `Task`, or `Story`, defaults to `Task`)
 - `description`: Detailed description of the ticket (optional)
+- `story_points`: Story points for the ticket (optional, Fibonacci sequence: 1, 2, 3, 5, 8, 13, etc.)
+- `create_test_ticket`: Override the default setting for automatically creating a linked Test ticket (optional, boolean)
+- `parent_epic`: Key of the parent epic to link this ticket to (optional, e.g., "PROJ-123")
+
+When creating a Story ticket with story points:
+
+- The "QA-Testable" label is automatically added to the Story
+- A linked Test ticket is automatically created (if `AUTO_CREATE_TEST_TICKETS` is enabled)
+- The Test ticket uses the Story's title as its description
+- The Test ticket is linked to the Story with a "Test Case Linking" relationship
 
 ### read-ticket
 
