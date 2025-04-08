@@ -7,7 +7,7 @@ A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol
 
 ## Features
 
-- Create JIRA tickets with summary, description, and issue type
+- Create JIRA tickets with summary, description, acceptance criteria, and issue type
 - Assign story points to Story tickets
 - Automatically create linked Test tickets for Stories with points
 - Seamless integration with Claude desktop application
@@ -84,6 +84,7 @@ Creates a new JIRA ticket.
 - `summary`: The title/summary of the ticket (required)
 - `issue_type`: The type of issue (`Bug`, `Task`, or `Story`, defaults to `Task`)
 - `description`: Detailed description of the ticket (optional)
+- `acceptance_criteria`: Acceptance criteria for the ticket (optional, stored in customfield_10429)
 - `story_points`: Story points for the ticket (optional, Fibonacci sequence: 1, 2, 3, 5, 8, 13, etc.)
 - `create_test_ticket`: Override the default setting for automatically creating a linked Test ticket (optional, boolean)
 - `parent_epic`: Key of the parent epic to link this ticket to (optional, e.g., "PROJ-123")
@@ -110,7 +111,17 @@ Once configured properly, you can ask Claude to create JIRA tickets directly:
 Please create a JIRA ticket to track the database performance issue we discussed.
 ```
 
-Claude will use the create-ticket tool to generate a ticket in your JIRA project.
+You can also specify acceptance criteria for your tickets:
+
+```
+Create a JIRA ticket for implementing the new user authentication feature with the following acceptance criteria:
+- Users can log in with email and password
+- Password reset functionality works via email
+- Account lockout occurs after 5 failed attempts
+- OAuth integration with Google and Facebook
+```
+
+Claude will use the create-ticket tool to generate a ticket in your JIRA project with all the specified details.
 
 ## Getting a JIRA API Token
 

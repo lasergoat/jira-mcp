@@ -46,9 +46,12 @@ const server = new McpServer({
 // Check if auto-creation of test tickets is enabled (default to true)
 const autoCreateTestTickets = process.env.AUTO_CREATE_TEST_TICKETS !== "false";
 
-// Helper function to format description for JIRA API v3
-function formatDescription(description: string | undefined) {
-  return description
+// Helper function to format text content for JIRA API v3
+function formatJiraContent(
+  content: string | undefined,
+  defaultText: string = "No content provided"
+) {
+  return content
     ? {
         type: "doc",
         version: 1,
@@ -58,7 +61,7 @@ function formatDescription(description: string | undefined) {
             content: [
               {
                 type: "text",
-                text: description,
+                text: content,
               },
             ],
           },
@@ -73,12 +76,22 @@ function formatDescription(description: string | undefined) {
             content: [
               {
                 type: "text",
-                text: "No description provided",
+                text: defaultText,
               },
             ],
           },
         ],
       };
+}
+
+// Helper function to format description for JIRA API v3
+function formatDescription(description: string | undefined) {
+  return formatJiraContent(description, "No description provided");
+}
+
+// Helper function to format acceptance criteria for JIRA API v3
+function formatAcceptanceCriteria(criteria: string | undefined) {
+  return formatJiraContent(criteria, "No acceptance criteria provided");
 }
 
 // Helper function to create a JIRA ticket
@@ -207,6 +220,7 @@ server.tool(
     summary: z.string().min(1, "Summary is required"),
     issue_type: z.enum(["Bug", "Task", "Story", "Test"]).default("Task"),
     description: z.string().optional(),
+    acceptance_criteria: z.string().optional(),
     story_points: z.number().optional(),
     create_test_ticket: z.boolean().optional(),
     parent_epic: z.string().optional(),
@@ -215,6 +229,7 @@ server.tool(
     summary,
     issue_type,
     description,
+    acceptance_criteria,
     story_points,
     create_test_ticket,
     parent_epic,
@@ -242,6 +257,13 @@ server.tool(
         },
       },
     };
+
+    // Add acceptance criteria if provided
+    if (acceptance_criteria !== undefined) {
+      // Using customfield_10429 for acceptance criteria based on the ticket data we examined
+      payload.fields.customfield_10429 =
+        formatAcceptanceCriteria(acceptance_criteria);
+    }
 
     // Only add custom fields for Bug, Task, and Story issue types, not for Test
     if (issue_type !== "Test") {
@@ -308,6 +330,10 @@ server.tool(
     let responseText = `Created ticket ${ticketKey} with summary: ${summary}, description: ${
       description || "No description"
     }, issue type: ${issue_type}`;
+
+    if (acceptance_criteria !== undefined) {
+      responseText += `, acceptance criteria: ${acceptance_criteria}`;
+    }
 
     if (story_points !== undefined) {
       responseText += `, story points: ${story_points}`;
