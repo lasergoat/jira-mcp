@@ -1,4 +1,7 @@
 {
+  "name": "jira-mcp",
+  "version": "1.1.0",
+  "description": "JIRA MCP Integration for Claude",
   "type": "module",
   "bin": {
     "jira-mcp": "./build/index.js"
