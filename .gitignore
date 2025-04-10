@@ -30,3 +30,6 @@ dist/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Configuration files
+jira-mcp-config-template.json
