@@ -260,41 +260,61 @@ server.tool(
 
     // Add acceptance criteria if provided
     if (acceptance_criteria !== undefined) {
-      // Using customfield_10429 for acceptance criteria based on the ticket data we examined
-      payload.fields.customfield_10429 =
+      // Using environment variable for acceptance criteria field
+      const acceptanceCriteriaField =
+        process.env.JIRA_ACCEPTANCE_CRITERIA_FIELD || "customfield_10429";
+      payload.fields[acceptanceCriteriaField] =
         formatAcceptanceCriteria(acceptance_criteria);
     }
 
     // Only add custom fields for Bug, Task, and Story issue types, not for Test
     if (issue_type !== "Test") {
-      // Required custom fields for 3ENOTIFY project
-      payload.fields.customfield_10757 = [
-        {
-          self: "https://3eco.atlassian.net/rest/api/3/customFieldOption/18852",
-          value: "Product Stewardship-3E Notify for SAP",
-          id: "18852",
-        },
-      ];
+      // Add product field if configured
+      const productField = process.env.JIRA_PRODUCT_FIELD;
+      const productValue = process.env.JIRA_PRODUCT_VALUE;
+      const productId = process.env.JIRA_PRODUCT_ID;
 
-      // Use CPP by default, but allow override via environment variable
-      payload.fields.customfield_10636 =
-        process.env.USE_NON_CPP === "true"
-          ? {
-              self: "https://3eco.atlassian.net/rest/api/3/customFieldOption/18384",
-              value: "Non-CPP",
-              id: "18384",
-            }
-          : {
-              self: "https://3eco.atlassian.net/rest/api/3/customFieldOption/18383",
-              value: "CPP",
-              id: "18383",
-            };
+      if (productField && productValue && productId) {
+        payload.fields[productField] = [
+          {
+            self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${productId}`,
+            value: productValue,
+            id: productId,
+          },
+        ];
+      }
+
+      // Add category field if configured
+      const categoryField = process.env.JIRA_CATEGORY_FIELD;
+
+      if (categoryField) {
+        const useAlternateCategory =
+          process.env.USE_ALTERNATE_CATEGORY === "true";
+
+        const categoryOptionId = useAlternateCategory
+          ? process.env.JIRA_ALTERNATE_CATEGORY_ID
+          : process.env.JIRA_DEFAULT_CATEGORY_ID;
+
+        const categoryOptionValue = useAlternateCategory
+          ? process.env.JIRA_ALTERNATE_CATEGORY_VALUE
+          : process.env.JIRA_DEFAULT_CATEGORY_VALUE;
+
+        if (categoryOptionId && categoryOptionValue) {
+          payload.fields[categoryField] = {
+            self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${categoryOptionId}`,
+            value: categoryOptionValue,
+            id: categoryOptionId,
+          };
+        }
+      }
     }
 
     // Add story points if provided
     if (story_points !== undefined && issue_type === "Story") {
-      // Using customfield_10040 for story points based on the ticket data we examined
-      payload.fields.customfield_10040 = story_points;
+      // Using environment variable for story points field
+      const storyPointsField =
+        process.env.JIRA_STORY_POINTS_FIELD || "customfield_10040";
+      payload.fields[storyPointsField] = story_points;
 
       // Add QA-Testable label for stories with points
       payload.fields.labels = ["QA-Testable"];
@@ -302,8 +322,10 @@ server.tool(
 
     // Add parent epic if provided
     if (parent_epic !== undefined) {
-      // Using customfield_10014 for Epic Link based on common JIRA configurations
-      payload.fields.customfield_10014 = parent_epic;
+      // Using environment variable for epic link field
+      const epicLinkField =
+        process.env.JIRA_EPIC_LINK_FIELD || "customfield_10014";
+      payload.fields[epicLinkField] = parent_epic;
     }
 
     // Create the auth token

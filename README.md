@@ -55,8 +55,22 @@ Add the following configuration to the file:
         "JIRA_USERNAME": "your-email@example.com",
         "JIRA_API_TOKEN": "your_api_token",
         "JIRA_PROJECT_KEY": "your_project_key",
-        "USE_NON_CPP": "false",
-        "AUTO_CREATE_TEST_TICKETS": "true"
+        "AUTO_CREATE_TEST_TICKETS": "true",
+
+        "JIRA_ACCEPTANCE_CRITERIA_FIELD": "customfield_10429",
+        "JIRA_STORY_POINTS_FIELD": "customfield_10040",
+        "JIRA_EPIC_LINK_FIELD": "customfield_10014",
+
+        "JIRA_PRODUCT_FIELD": "customfield_10757",
+        "JIRA_PRODUCT_VALUE": "Your Product Name",
+        "JIRA_PRODUCT_ID": "12345",
+
+        "JIRA_CATEGORY_FIELD": "customfield_10636",
+        "USE_ALTERNATE_CATEGORY": "false",
+        "JIRA_DEFAULT_CATEGORY_VALUE": "Default Category",
+        "JIRA_DEFAULT_CATEGORY_ID": "12345",
+        "JIRA_ALTERNATE_CATEGORY_VALUE": "Alternate Category",
+        "JIRA_ALTERNATE_CATEGORY_ID": "67890"
       }
     }
   }
@@ -70,8 +84,30 @@ Replace the placeholder values with your actual JIRA information:
 - `JIRA_USERNAME`: Your JIRA username (usually your email address)
 - `JIRA_API_TOKEN`: Your JIRA API token (see below for how to get this)
 - `JIRA_PROJECT_KEY`: The key for your JIRA project (e.g., `SCRUM`, `DEV`, etc.)
-- `USE_NON_CPP`: Set to "true" to use "Non-CPP" for the customfield_10636 field, or "false" (default) to use "CPP"
 - `AUTO_CREATE_TEST_TICKETS`: Set to "true" (default) to automatically create linked Test tickets for Story tickets with points, or "false" to disable this feature
+
+### Custom Field Configuration
+
+The following environment variables allow you to configure custom fields without hardcoding them in the source code:
+
+- `JIRA_ACCEPTANCE_CRITERIA_FIELD`: The field ID for acceptance criteria (default: "customfield_10429")
+- `JIRA_STORY_POINTS_FIELD`: The field ID for story points (default: "customfield_10040")
+- `JIRA_EPIC_LINK_FIELD`: The field ID for epic links (default: "customfield_10014")
+
+#### Product Field Configuration (Optional)
+
+- `JIRA_PRODUCT_FIELD`: The field ID for the product field
+- `JIRA_PRODUCT_VALUE`: The display value for the product
+- `JIRA_PRODUCT_ID`: The ID of the product option
+
+#### Category Field Configuration (Optional)
+
+- `JIRA_CATEGORY_FIELD`: The field ID for the category field
+- `USE_ALTERNATE_CATEGORY`: Set to "true" to use alternate category, "false" for default
+- `JIRA_DEFAULT_CATEGORY_VALUE`: The display value for the default category
+- `JIRA_DEFAULT_CATEGORY_ID`: The ID of the default category option
+- `JIRA_ALTERNATE_CATEGORY_VALUE`: The display value for the alternate category
+- `JIRA_ALTERNATE_CATEGORY_ID`: The ID of the alternate category option
 
 ## Available Tools
 
