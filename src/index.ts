@@ -33,6 +33,30 @@ type JiraGetResponse = {
   [key: string]: any;
 };
 
+type JiraSearchResponse = {
+  errorMessages?: string[];
+  issues?: Array<{
+    key: string;
+    fields: {
+      summary: string;
+      description?: any;
+      issuetype: {
+        name: string;
+      };
+      status?: {
+        name: string;
+      };
+      priority?: {
+        name: string;
+      };
+      [key: string]: any; // Allow for custom fields
+    };
+  }>;
+  total?: number;
+  maxResults?: number;
+  startAt?: number;
+};
+
 process.on("uncaughtException", (error) => {
   console.error("UNCAUGHT EXCEPTION:", error);
 });
@@ -91,7 +115,75 @@ function formatDescription(description: string | undefined) {
 
 // Helper function to format acceptance criteria for JIRA API v3
 function formatAcceptanceCriteria(criteria: string | undefined) {
-  return formatJiraContent(criteria, "No acceptance criteria provided");
+  // Check if criteria is undefined or empty
+  if (!criteria) {
+    return {
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: "No acceptance criteria provided",
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  // Split criteria by newlines to handle bullet points properly
+  const lines = criteria.split("\n");
+  const content = [];
+
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+
+    // Skip empty lines
+    if (!trimmedLine) continue;
+
+    // Check if line is a bullet point
+    if (trimmedLine.startsWith("-") || trimmedLine.startsWith("*")) {
+      content.push({
+        type: "bulletList",
+        content: [
+          {
+            type: "listItem",
+            content: [
+              {
+                type: "paragraph",
+                content: [
+                  {
+                    type: "text",
+                    text: trimmedLine.substring(1).trim(),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    } else {
+      // Regular paragraph
+      content.push({
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: trimmedLine,
+          },
+        ],
+      });
+    }
+  }
+
+  return {
+    type: "doc",
+    version: 1,
+    content: content,
+  };
 }
 
 // Helper function to create a JIRA ticket
@@ -212,6 +304,65 @@ async function createTicketLink(
   }
 }
 
+// Helper function to search for JIRA tickets
+async function searchJiraTickets(
+  jql: string,
+  maxResults: number,
+  auth: string
+): Promise<{
+  success: boolean;
+  data: JiraSearchResponse;
+  errorMessage?: string;
+}> {
+  const jiraUrl = `https://${
+    process.env.JIRA_HOST
+  }/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}`;
+
+  console.log("JIRA Search URL:", jiraUrl);
+  console.log("JIRA Search JQL:", jql);
+  console.log("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
+
+  try {
+    const response = await fetch(jiraUrl, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+    });
+
+    const responseData = (await response.json()) as JiraSearchResponse;
+
+    if (!response.ok) {
+      console.error(
+        "Error searching tickets:",
+        JSON.stringify(responseData, null, 2),
+        "Status:",
+        response.status,
+        response.statusText
+      );
+
+      // Try to extract more detailed error information
+      let errorMessage = `Status: ${response.status} ${response.statusText}`;
+
+      if (responseData.errorMessages && responseData.errorMessages.length > 0) {
+        errorMessage = responseData.errorMessages.join(", ");
+      }
+
+      return { success: false, data: responseData, errorMessage };
+    }
+
+    return { success: true, data: responseData };
+  } catch (error) {
+    console.error("Exception searching tickets:", error);
+    return {
+      success: false,
+      data: {},
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 // Register JIRA tools
 server.tool(
   "create-ticket",
@@ -263,8 +414,19 @@ server.tool(
       // Using environment variable for acceptance criteria field
       const acceptanceCriteriaField =
         process.env.JIRA_ACCEPTANCE_CRITERIA_FIELD || "customfield_10429";
+
+      // Format and add acceptance criteria to the custom field only, not to description
       payload.fields[acceptanceCriteriaField] =
         formatAcceptanceCriteria(acceptance_criteria);
+
+      // Log for debugging
+      console.log(
+        `Adding acceptance criteria to field ${acceptanceCriteriaField}`
+      );
+      console.log(
+        "Formatted acceptance criteria:",
+        JSON.stringify(formatAcceptanceCriteria(acceptance_criteria), null, 2)
+      );
     }
 
     // Only add custom fields for Bug, Task, and Story issue types, not for Test
@@ -536,6 +698,75 @@ server.tool(
         ],
       };
     }
+  }
+);
+
+server.tool(
+  "search-tickets",
+  "Search for jira tickets by issue type",
+  {
+    issue_type: z.enum(["Bug", "Task", "Story", "Test"]),
+    max_results: z.number().min(1).max(50).default(10).optional(),
+    additional_criteria: z.string().optional(), // For additional JQL criteria
+  },
+  async ({ issue_type, max_results = 10, additional_criteria }) => {
+    // Create the auth token
+    const auth = Buffer.from(
+      `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+    ).toString("base64");
+
+    // Construct the JQL query
+    let jql = `project = "${process.env.JIRA_PROJECT_KEY}" AND issuetype = "${issue_type}"`;
+
+    // Add additional criteria if provided
+    if (additional_criteria) {
+      jql += ` AND (${additional_criteria})`;
+    }
+
+    // Search for tickets
+    const result = await searchJiraTickets(jql, max_results, auth);
+
+    if (!result.success) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error searching tickets: ${result.errorMessage}`,
+          },
+        ],
+      };
+    }
+
+    // Check if we have results
+    if (!result.data.issues || result.data.issues.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No ${issue_type} tickets found matching the criteria.`,
+          },
+        ],
+      };
+    }
+
+    // Format the results
+    const tickets = result.data.issues.map((issue) => ({
+      key: issue.key,
+      summary: issue.fields.summary,
+      status: issue.fields.status?.name || "Unknown",
+      priority: issue.fields.priority?.name || "Unknown",
+    }));
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Found ${result.data.total} ${issue_type} tickets (showing ${
+            tickets.length
+          }):\n\n${JSON.stringify(tickets, null, 2)}`,
+        },
+      ],
+    };
   }
 );
 
