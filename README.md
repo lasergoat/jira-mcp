@@ -132,12 +132,35 @@ When creating a Story ticket with story points:
 - The Test ticket uses the Story's title as its description
 - The Test ticket is linked to the Story with a "Test Case Linking" relationship
 
-### read-ticket
+### get-ticket
 
 Retrieves the details of an existing JIRA ticket.
+
 **Parameters:**
 
 - `ticket_id`: The ID of the JIRA ticket you want to read (required)
+
+### search-tickets
+
+Searches for JIRA tickets by issue type.
+
+**Parameters:**
+
+- `issue_type`: The type of issue to search for (`Bug`, `Task`, `Story`, or `Test`) (required)
+- `max_results`: Maximum number of results to return (optional, default: 10, max: 50)
+- `additional_criteria`: Additional JQL criteria to include in the search (optional)
+
+This tool allows you to find all tickets of a specific type (e.g., all Bug tickets) in your JIRA project. You can further refine your search by providing additional JQL criteria.
+
+### link-tickets
+
+Links two JIRA tickets together.
+
+**Parameters:**
+
+- `outward_issue`: The key of the outward issue (required)
+- `inward_issue`: The key of the inward issue (required)
+- `link_type`: The type of link to create (optional, defaults to "Test Case Linking")
 
 ## Usage with Claude
 
