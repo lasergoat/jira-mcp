@@ -5,8 +5,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import fetch from "node-fetch";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
 
-// Define types for JIRA responses
+// Define types for JIRA and Zephyr responses
 type JiraCreateResponse = {
   errorMessages?: string[];
   errors?: Record<string, string>;
@@ -16,6 +18,7 @@ type JiraCreateResponse = {
 
 type JiraGetResponse = {
   errorMessages?: string[];
+  id?: string; // Internal Jira ID
   fields?: {
     summary: string;
     description?: any;
@@ -57,9 +60,123 @@ type JiraSearchResponse = {
   startAt?: number;
 };
 
+type ZephyrAddTestStepResponse = {
+  id?: number;
+  orderId?: number;
+  step?: string;
+  data?: string;
+  result?: string;
+  [key: string]: any;
+};
+
 process.on("uncaughtException", (error) => {
   console.error("UNCAUGHT EXCEPTION:", error);
 });
+
+// Helper function to generate a JWT token for Zephyr API
+function generateZephyrJwt(
+  method: string,
+  apiPath: string,
+  expirationSec: number = 3600
+): string {
+  // Zephyr base URL from environment variable
+  const zephyrBase = (
+    process.env.ZAPI_BASE_URL || "https://prod-api.zephyr4jiracloud.com/connect"
+  ).replace(/\/$/, "");
+
+  // Build the canonical string: METHOD&<path>&
+  const canonical = `${method.toUpperCase()}&${apiPath}&`;
+
+  // Create SHA-256 hex hash of canonical string
+  const qsh = crypto
+    .createHash("sha256")
+    .update(canonical, "utf8")
+    .digest("hex");
+
+  // Timestamps
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + expirationSec;
+
+  // JWT claims
+  const payload = {
+    sub: process.env.ZAPI_ACCOUNT_ID, // Atlassian account ID
+    iss: process.env.ZAPI_ACCESS_KEY, // Zephyr Access Key
+    qsh, // query-string hash
+    iat: now,
+    exp,
+  };
+
+  // Sign with HMAC-SHA256 using Zephyr Secret Key
+  return jwt.sign(payload, process.env.ZAPI_SECRET_KEY || "", {
+    algorithm: "HS256",
+  });
+}
+
+// Helper function to add a test step to a Zephyr test
+async function addZephyrTestStep(
+  issueId: string,
+  step: string,
+  data: string = "",
+  result: string = ""
+): Promise<{
+  success: boolean;
+  data?: ZephyrAddTestStepResponse;
+  errorMessage?: string;
+}> {
+  // Zephyr base URL from environment variable
+  const baseUrl =
+    process.env.ZAPI_BASE_URL ||
+    "https://prod-api.zephyr4jiracloud.com/connect";
+  const apiPath = `/rest/zapi/latest/teststep/${issueId}`;
+  const fullUrl = `${baseUrl}${apiPath}`;
+
+  console.log("Zephyr URL:", fullUrl);
+  console.log(
+    "Zephyr Payload:",
+    JSON.stringify({ step, data, result }, null, 2)
+  );
+
+  try {
+    // Generate JWT for this specific API call
+    const jwtToken = generateZephyrJwt("POST", apiPath);
+
+    const response = await fetch(fullUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        zapiAccessKey: process.env.ZAPI_ACCESS_KEY || "",
+        Authorization: `JWT ${jwtToken}`,
+      },
+      body: JSON.stringify({ step, data, result }),
+    });
+
+    const responseData = (await response.json()) as ZephyrAddTestStepResponse;
+
+    if (!response.ok) {
+      console.error(
+        "Error adding test step:",
+        JSON.stringify(responseData, null, 2),
+        "Status:",
+        response.status,
+        response.statusText
+      );
+
+      return {
+        success: false,
+        data: responseData,
+        errorMessage: `Status: ${response.status} ${response.statusText}`,
+      };
+    }
+
+    return { success: true, data: responseData };
+  } catch (error) {
+    console.error("Exception adding test step:", error);
+    return {
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
 
 // Create server instance
 const server = new McpServer({
@@ -767,6 +884,139 @@ server.tool(
         },
       ],
     };
+  }
+);
+
+// Helper function to get the internal Jira ID from a ticket key
+async function getJiraIssueId(
+  ticketKey: string,
+  auth: string
+): Promise<{
+  success: boolean;
+  id?: string;
+  errorMessage?: string;
+}> {
+  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}`;
+
+  try {
+    const response = await fetch(jiraUrl, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+    });
+
+    const responseData = (await response.json()) as JiraGetResponse;
+
+    if (!response.ok) {
+      console.error("Error fetching ticket:", responseData);
+
+      let errorMessage = `Status: ${response.status} ${response.statusText}`;
+      if (responseData.errorMessages && responseData.errorMessages.length > 0) {
+        errorMessage = responseData.errorMessages.join(", ");
+      }
+
+      return { success: false, errorMessage };
+    }
+
+    if (!responseData.id) {
+      return {
+        success: false,
+        errorMessage: "No issue ID found in response",
+      };
+    }
+
+    return { success: true, id: responseData.id };
+  } catch (error) {
+    console.error("Exception fetching ticket ID:", error);
+    return {
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// Register new tool for adding test steps
+server.tool(
+  "add-test-steps",
+  "Add test steps to a test ticket via Zephyr integration",
+  {
+    ticket_key: z.string().min(1, "Ticket key is required"),
+    steps: z
+      .array(
+        z.object({
+          step: z.string().min(1, "Step description is required"),
+          data: z.string().optional(),
+          result: z.string().optional(),
+        })
+      )
+      .min(1, "At least one test step is required"),
+  },
+  async ({ ticket_key, steps }) => {
+    // Create the auth token for Jira API
+    const auth = Buffer.from(
+      `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+    ).toString("base64");
+
+    // Get the internal Jira ID from the ticket key
+    const idResult = await getJiraIssueId(ticket_key, auth);
+
+    if (!idResult.success || !idResult.id) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting internal ID for ticket ${ticket_key}: ${idResult.errorMessage}`,
+          },
+        ],
+      };
+    }
+
+    const issueId = idResult.id;
+    console.log(`Found internal ID for ticket ${ticket_key}: ${issueId}`);
+
+    // Add each test step
+    const results = [];
+    let allSuccessful = true;
+
+    for (const [index, { step, data = "", result = "" }] of steps.entries()) {
+      console.log(`Adding test step ${index + 1}/${steps.length}: ${step}`);
+
+      const stepResult = await addZephyrTestStep(issueId, step, data, result);
+
+      if (stepResult.success) {
+        results.push(`Step ${index + 1}: Added successfully`);
+      } else {
+        results.push(`Step ${index + 1}: Failed - ${stepResult.errorMessage}`);
+        allSuccessful = false;
+      }
+    }
+
+    // Return the results
+    if (allSuccessful) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Successfully added ${
+              steps.length
+            } test step(s) to ticket ${ticket_key}:\n\n${results.join("\n")}`,
+          },
+        ],
+      };
+    } else {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Some test steps could not be added to ticket ${ticket_key}:\n\n${results.join(
+              "\n"
+            )}`,
+          },
+        ],
+      };
+    }
   }
 );
 

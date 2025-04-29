@@ -132,6 +132,40 @@ When creating a Story ticket with story points:
 - The Test ticket uses the Story's title as its description
 - The Test ticket is linked to the Story with a "Test Case Linking" relationship
 
+### add-test-steps
+
+Adds test steps to a test ticket via the Zephyr integration.
+
+**Parameters:**
+
+- `ticket_key`: The key of the test ticket to add steps to (required, e.g., "PROJ-123")
+- `steps`: An array of test step objects (required), where each step object contains:
+  - `step`: The description of the test step (required)
+  - `data`: Test data for the step (optional)
+  - `result`: Expected result of the step (optional)
+
+**Example:**
+
+```json
+{
+  "ticket_key": "PROJ-123",
+  "steps": [
+    {
+      "step": "Navigate to the login page",
+      "data": "https://example.com/login",
+      "result": "Login form is displayed"
+    },
+    {
+      "step": "Enter valid credentials",
+      "data": "username=test, password=password123",
+      "result": "User is logged in successfully"
+    }
+  ]
+}
+```
+
+This tool requires Zephyr for Jira Cloud to be installed and configured. You'll need to set the Zephyr API environment variables in your configuration file (see MCP-CONFIG-README.md for details).
+
 ### get-ticket
 
 Retrieves the details of an existing JIRA ticket.
