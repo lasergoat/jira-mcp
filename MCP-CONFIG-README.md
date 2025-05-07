@@ -34,6 +34,16 @@ The following environment variables are **required** for the JIRA MCP server to 
 
 - `AUTO_CREATE_TEST_TICKETS`: Set to "true" (default) to automatically create linked Test tickets for Story tickets with points, or "false" to disable this feature
 
+### Zephyr Integration
+
+These environment variables are required for the Zephyr integration to add test steps to test tickets:
+
+- `ZAPI_BASE_URL`: The base URL for the Zephyr API (default: "https://prod-api.zephyr4jiracloud.com/connect")
+- `ZAPI_ACCESS_KEY`: Your Zephyr Access Key (found in Zephyr Cloud settings under API Keys)
+- `ZAPI_SECRET_KEY`: Your Zephyr Secret Key (found in Zephyr Cloud settings under API Keys)
+- `ZAPI_ACCOUNT_ID`: Your Atlassian Account ID
+- `ZAPI_JWT_EXPIRE_SEC`: JWT token expiration time in seconds (default: 3600)
+
 ### Custom Field IDs
 
 These fields have defaults in the code but can be overridden if your JIRA instance uses different custom field IDs:

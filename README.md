@@ -124,6 +124,8 @@ Creates a new JIRA ticket.
 - `story_points`: Story points for the ticket (optional, Fibonacci sequence: 1, 2, 3, 5, 8, 13, etc.)
 - `create_test_ticket`: Override the default setting for automatically creating a linked Test ticket (optional, boolean)
 - `parent_epic`: Key of the parent epic to link this ticket to (optional, e.g., "PROJ-123")
+- `sprint`: The name of the sprint to assign the ticket to (optional, e.g., "2025_C1_S07")
+- `story_readiness`: Whether the story is ready for development (optional, "Yes" or "No")
 
 When creating a Story ticket with story points:
 
@@ -131,6 +133,40 @@ When creating a Story ticket with story points:
 - A linked Test ticket is automatically created (if `AUTO_CREATE_TEST_TICKETS` is enabled)
 - The Test ticket uses the Story's title as its description
 - The Test ticket is linked to the Story with a "Test Case Linking" relationship
+
+### add-test-steps
+
+Adds test steps to a test ticket via the Zephyr integration.
+
+**Parameters:**
+
+- `ticket_key`: The key of the test ticket to add steps to (required, e.g., "PROJ-123")
+- `steps`: An array of test step objects (required), where each step object contains:
+  - `step`: The description of the test step (required)
+  - `data`: Test data for the step (optional)
+  - `result`: Expected result of the step (optional)
+
+**Example:**
+
+```json
+{
+  "ticket_key": "PROJ-123",
+  "steps": [
+    {
+      "step": "Navigate to the login page",
+      "data": "https://example.com/login",
+      "result": "Login form is displayed"
+    },
+    {
+      "step": "Enter valid credentials",
+      "data": "username=test, password=password123",
+      "result": "User is logged in successfully"
+    }
+  ]
+}
+```
+
+This tool requires Zephyr for Jira Cloud to be installed and configured. You'll need to set the Zephyr API environment variables in your configuration file (see MCP-CONFIG-README.md for details).
 
 ### get-ticket
 
@@ -151,6 +187,18 @@ Searches for JIRA tickets by issue type.
 - `additional_criteria`: Additional JQL criteria to include in the search (optional)
 
 This tool allows you to find all tickets of a specific type (e.g., all Bug tickets) in your JIRA project. You can further refine your search by providing additional JQL criteria.
+
+### update-ticket
+
+Updates an existing JIRA ticket with new field values.
+
+**Parameters:**
+
+- `ticket_key`: The key of the JIRA ticket to update (required, e.g., "PROJ-123")
+- `sprint`: The name of the sprint to assign the ticket to (optional, e.g., "2025_C1_S07")
+- `story_readiness`: Whether the story is ready for development (optional, "Yes" or "No")
+
+This tool allows you to update existing tickets with sprint information and story readiness status. At least one field must be provided for the update to proceed.
 
 ### link-tickets
 
