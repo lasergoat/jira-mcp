@@ -7,6 +7,7 @@ import { z } from "zod";
 import fetch from "node-fetch";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import { updateJiraTicket } from "./update-ticket.js";
 
 // Define types for JIRA and Zephyr responses
 type JiraCreateResponse = {
@@ -492,6 +493,8 @@ server.tool(
     story_points: z.number().optional(),
     create_test_ticket: z.boolean().optional(),
     parent_epic: z.string().optional(),
+    sprint: z.string().optional(),
+    story_readiness: z.enum(["Yes", "No"]).optional(),
   },
   async ({
     summary,
@@ -501,6 +504,8 @@ server.tool(
     story_points,
     create_test_ticket,
     parent_epic,
+    sprint,
+    story_readiness,
   }) => {
     const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue`;
 
@@ -605,6 +610,27 @@ server.tool(
       const epicLinkField =
         process.env.JIRA_EPIC_LINK_FIELD || "customfield_10014";
       payload.fields[epicLinkField] = parent_epic;
+    }
+
+    // Add sprint if provided
+    if (sprint !== undefined) {
+      // Sprint field is customfield_10020 based on our query
+      payload.fields["customfield_10020"] = [
+        {
+          name: sprint,
+        },
+      ];
+    }
+
+    // Add story readiness if provided
+    if (story_readiness !== undefined) {
+      // Story Readiness field is customfield_10596 based on our query
+      const storyReadinessId = story_readiness === "Yes" ? "18256" : "18257";
+      payload.fields["customfield_10596"] = {
+        self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${storyReadinessId}`,
+        value: story_readiness,
+        id: storyReadinessId,
+      };
     }
 
     // Create the auth token
@@ -936,6 +962,93 @@ async function getJiraIssueId(
     };
   }
 }
+
+// Register new tool for updating tickets
+server.tool(
+  "update-ticket",
+  "Update an existing jira ticket",
+  {
+    ticket_key: z.string().min(1, "Ticket key is required"),
+    sprint: z.string().optional(),
+    story_readiness: z.enum(["Yes", "No"]).optional(),
+  },
+  async ({ ticket_key, sprint, story_readiness }) => {
+    // Create the auth token
+    const auth = Buffer.from(
+      `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+    ).toString("base64");
+
+    // Build the payload for the update
+    const payload: any = {
+      fields: {},
+    };
+
+    // Add sprint if provided
+    if (sprint !== undefined) {
+      // Sprint field is customfield_10020 based on our query
+      payload.fields["customfield_10020"] = [
+        {
+          name: sprint,
+        },
+      ];
+    }
+
+    // Add story readiness if provided
+    if (story_readiness !== undefined) {
+      // Story Readiness field is customfield_10596 based on our query
+      const storyReadinessId = story_readiness === "Yes" ? "18256" : "18257";
+      payload.fields["customfield_10596"] = {
+        self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${storyReadinessId}`,
+        value: story_readiness,
+        id: storyReadinessId,
+      };
+    }
+
+    // If no fields were provided, return an error
+    if (Object.keys(payload.fields).length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Error: At least one field to update must be provided",
+          },
+        ],
+      };
+    }
+
+    // Update the ticket
+    const result = await updateJiraTicket(ticket_key, payload, auth);
+
+    if (!result.success) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error updating ticket: ${result.errorMessage}`,
+          },
+        ],
+      };
+    }
+
+    // Build response text
+    let responseText = `Successfully updated ticket ${ticket_key}`;
+    if (sprint !== undefined) {
+      responseText += `, sprint: ${sprint}`;
+    }
+    if (story_readiness !== undefined) {
+      responseText += `, story readiness: ${story_readiness}`;
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: responseText,
+        },
+      ],
+    };
+  }
+);
 
 // Register new tool for adding test steps
 server.tool(

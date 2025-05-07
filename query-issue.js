@@ -70,7 +70,7 @@ async function queryIssue(ticketKey) {
 }
 
 // Test data
-const ticketKey = "3ENOTIFY-5956";
+const ticketKey = "";
 
 // Run the test
 queryIssue(ticketKey)
