@@ -188,10 +188,10 @@ async function addTestSteps(ticketKey, steps) {
 }
 
 // Test data
-const ticketKey = "3ENOTIFY-5956";
+const ticketKey = "Bob-5956";
 const steps = [
     {
-        step: "Navigate to https://3ecosystem.dev.3eiq.com/mfes/termsOfService/index.html",
+        step: "Navigate to https://larry.dev.bob.com/mfes/termsOfService/index.html",
         data: "",
         result: "Page loads successfully"
     },
