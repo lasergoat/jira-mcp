@@ -6,14 +6,20 @@ import jwt from 'jsonwebtoken';
 import fetch from 'node-fetch';
 
 // Helper function to generate a JWT token for Zephyr API
-function generateZephyrJwt(method, apiPath, expirationSec = 3600) {
+function generateZephyrJwt(method, apiPath, queryParams = {}, expirationSec = 3600) {
     // Zephyr base URL from environment variable
     const zephyrBase = (
         process.env.ZAPI_BASE_URL || "https://prod-api.zephyr4jiracloud.com/connect"
     ).replace(/\/$/, "");
 
-    // Build the canonical string: METHOD&<path>&
-    const canonical = `${method.toUpperCase()}&${apiPath}&`;
+    // Sort query parameters alphabetically
+    const canonicalQuery = Object.keys(queryParams)
+        .sort()
+        .map(key => `${key}=${queryParams[key]}`)
+        .join('&');
+
+    // Build the canonical string: METHOD&<path>&<query>
+    const canonical = `${method.toUpperCase()}&${apiPath}&${canonicalQuery}`;
 
     // Create SHA-256 hex hash of canonical string
     const qsh = crypto
@@ -41,23 +47,35 @@ function generateZephyrJwt(method, apiPath, expirationSec = 3600) {
 }
 
 // Helper function to add a test step to a Zephyr test
-async function addZephyrTestStep(issueId, step, data = "", result = "") {
+async function addZephyrTestStep(issueId, projectId, step, data = "", result = "") {
     // Zephyr base URL from environment variable
     const baseUrl =
         process.env.ZAPI_BASE_URL ||
         "https://prod-api.zephyr4jiracloud.com/connect";
-    const apiPath = `/rest/zapi/latest/teststep/${issueId}`;
-    const fullUrl = `${baseUrl}${apiPath}`;
+    // Use the correct API endpoint format for Zephyr Squad Cloud (without trailing slash)
+    const apiPath = `/public/rest/api/1.0/teststep/${issueId}`;
+
+    // Query parameters
+    const queryParams = { projectId };
+
+    // Build the query string
+    const queryString = Object.keys(queryParams)
+        .sort()
+        .map(key => `${key}=${queryParams[key]}`)
+        .join('&');
+
+    // Full URL with query parameters
+    const fullUrl = `${baseUrl}${apiPath}?${queryString}`;
 
     console.log("Zephyr URL:", fullUrl);
     console.log(
         "Zephyr Payload:",
-        JSON.stringify({ step, data, result }, null, 2)
+        JSON.stringify({ projectId, step, data, result }, null, 2)
     );
 
     try {
-        // Generate JWT for this specific API call
-        const jwtToken = generateZephyrJwt("POST", apiPath);
+        // Generate JWT for this specific API call with query parameters
+        const jwtToken = generateZephyrJwt("POST", apiPath, queryParams);
 
         const response = await fetch(fullUrl, {
             method: "POST",
@@ -66,7 +84,7 @@ async function addZephyrTestStep(issueId, step, data = "", result = "") {
                 zapiAccessKey: process.env.ZAPI_ACCESS_KEY || "",
                 Authorization: `JWT ${jwtToken}`,
             },
-            body: JSON.stringify({ step, data, result }),
+            body: JSON.stringify({ projectId, step, data, result }),
         });
 
         const responseData = await response.json();
@@ -97,7 +115,7 @@ async function addZephyrTestStep(issueId, step, data = "", result = "") {
     }
 }
 
-// Helper function to get the internal Jira ID from a ticket key
+// Helper function to get the internal Jira ID and project ID from a ticket key
 async function getJiraIssueId(ticketKey, auth) {
     const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}`;
 
@@ -130,7 +148,19 @@ async function getJiraIssueId(ticketKey, auth) {
             };
         }
 
-        return { success: true, id: responseData.id };
+        // Extract project ID from the response
+        const projectId = responseData.fields?.project?.id;
+        if (!projectId) {
+            console.log("Warning: Project ID not found in response");
+        } else {
+            console.log(`Found project ID: ${projectId}`);
+        }
+
+        return {
+            success: true,
+            id: responseData.id,
+            projectId
+        };
     } catch (error) {
         console.error("Exception fetching ticket ID:", error);
         return {
@@ -165,7 +195,7 @@ async function addTestSteps(ticketKey, steps) {
     for (const [index, { step, data = "", result = "" }] of steps.entries()) {
         console.log(`Adding test step ${index + 1}/${steps.length}: ${step}`);
 
-        const stepResult = await addZephyrTestStep(issueId, step, data, result);
+        const stepResult = await addZephyrTestStep(issueId, idResult.projectId, step, data, result);
 
         if (stepResult.success) {
             console.log(`Step ${index + 1}: Added successfully`);
@@ -188,26 +218,26 @@ async function addTestSteps(ticketKey, steps) {
 }
 
 // Test data
-const ticketKey = "3ENOTIFY-5956";
+const ticketKey = "DEMO-123";
 const steps = [
     {
-        step: "Navigate to https://3ecosystem.dev.3eiq.com/mfes/termsOfService/index.html",
-        data: "",
+        step: "Navigate to the application homepage",
+        data: "Use the development environment URL",
         result: "Page loads successfully"
     },
     {
         step: "Verify that the Terms of Service overlay displays correctly",
-        data: "",
+        data: "Check the overlay content and styling",
         result: "ToS overlay displays with correct content"
     },
     {
         step: "Click the Accept button",
-        data: "",
+        data: "Click the primary action button",
         result: "Button click is registered"
     },
     {
         step: "Verify that the Terms of Service are accepted and the overlay is closed",
-        data: "",
+        data: "Check the UI state after clicking Accept",
         result: "ToS overlay is closed and acceptance is recorded"
     }
 ];

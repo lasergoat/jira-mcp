@@ -8,6 +8,7 @@ import fetch from "node-fetch";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { updateJiraTicket } from "./update-ticket.js";
+import { getZephyrTestSteps } from "./get-zephyr-test-steps.js";
 
 // Define types for JIRA and Zephyr responses
 type JiraCreateResponse = {
@@ -78,6 +79,7 @@ process.on("uncaughtException", (error) => {
 function generateZephyrJwt(
   method: string,
   apiPath: string,
+  queryParams: Record<string, string> = {},
   expirationSec: number = 3600
 ): string {
   // Zephyr base URL from environment variable
@@ -85,8 +87,14 @@ function generateZephyrJwt(
     process.env.ZAPI_BASE_URL || "https://prod-api.zephyr4jiracloud.com/connect"
   ).replace(/\/$/, "");
 
-  // Build the canonical string: METHOD&<path>&
-  const canonical = `${method.toUpperCase()}&${apiPath}&`;
+  // Sort query parameters alphabetically
+  const canonicalQuery = Object.keys(queryParams)
+    .sort()
+    .map((key) => `${key}=${queryParams[key]}`)
+    .join("&");
+
+  // Build the canonical string: METHOD&<path>&<query>
+  const canonical = `${method.toUpperCase()}&${apiPath}&${canonicalQuery}`;
 
   // Create SHA-256 hex hash of canonical string
   const qsh = crypto
@@ -116,6 +124,7 @@ function generateZephyrJwt(
 // Helper function to add a test step to a Zephyr test
 async function addZephyrTestStep(
   issueId: string,
+  projectId: string,
   step: string,
   data: string = "",
   result: string = ""
@@ -128,18 +137,29 @@ async function addZephyrTestStep(
   const baseUrl =
     process.env.ZAPI_BASE_URL ||
     "https://prod-api.zephyr4jiracloud.com/connect";
-  const apiPath = `/rest/zapi/latest/teststep/${issueId}`;
-  const fullUrl = `${baseUrl}${apiPath}`;
+  // Use the correct API endpoint format for Zephyr Squad Cloud
+  const apiPath = `/public/rest/api/1.0/teststep/${issueId}`;
+
+  // Query parameters
+  const queryParams = { projectId };
+
+  // Build the query string
+  const queryString = Object.keys(queryParams)
+    .map((key) => `${key}=${queryParams[key as keyof typeof queryParams]}`)
+    .join("&");
+
+  // Full URL with query parameters
+  const fullUrl = `${baseUrl}${apiPath}?${queryString}`;
 
   console.log("Zephyr URL:", fullUrl);
   console.log(
     "Zephyr Payload:",
-    JSON.stringify({ step, data, result }, null, 2)
+    JSON.stringify({ projectId, step, data, result }, null, 2)
   );
 
   try {
-    // Generate JWT for this specific API call
-    const jwtToken = generateZephyrJwt("POST", apiPath);
+    // Generate JWT for this specific API call with query parameters
+    const jwtToken = generateZephyrJwt("POST", apiPath, queryParams);
 
     const response = await fetch(fullUrl, {
       method: "POST",
@@ -148,7 +168,7 @@ async function addZephyrTestStep(
         zapiAccessKey: process.env.ZAPI_ACCESS_KEY || "",
         Authorization: `JWT ${jwtToken}`,
       },
-      body: JSON.stringify({ step, data, result }),
+      body: JSON.stringify({ projectId, step, data, result }),
     });
 
     const responseData = (await response.json()) as ZephyrAddTestStepResponse;
@@ -789,7 +809,15 @@ server.tool(
         },
       });
 
-      const responseData = (await response.json()) as JiraGetResponse;
+      const responseData = (await response.json()) as {
+        id?: string;
+        errorMessages?: string[];
+        fields?: {
+          project?: {
+            id?: string;
+          };
+        };
+      };
 
       if (!response.ok) {
         console.error("Error fetching ticket:", responseData);
@@ -913,13 +941,14 @@ server.tool(
   }
 );
 
-// Helper function to get the internal Jira ID from a ticket key
+// Helper function to get the internal Jira ID and project ID from a ticket key
 async function getJiraIssueId(
   ticketKey: string,
   auth: string
 ): Promise<{
   success: boolean;
   id?: string;
+  projectId?: string;
   errorMessage?: string;
 }> {
   const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}`;
@@ -953,7 +982,19 @@ async function getJiraIssueId(
       };
     }
 
-    return { success: true, id: responseData.id };
+    // Extract project ID from the response
+    const projectId = responseData.fields?.project?.id;
+    if (!projectId) {
+      console.log("Warning: Project ID not found in response");
+    } else {
+      console.log(`Found project ID: ${projectId}`);
+    }
+
+    return {
+      success: true,
+      id: responseData.id,
+      projectId,
+    };
   } catch (error) {
     console.error("Exception fetching ticket ID:", error);
     return {
@@ -1050,6 +1091,102 @@ server.tool(
   }
 );
 
+// Register new tool for getting Zephyr test steps
+server.tool(
+  "get-test-steps",
+  "Get test steps from a test ticket via Zephyr integration",
+  {
+    ticket_key: z.string().min(1, "Ticket key is required"),
+  },
+  async ({ ticket_key }) => {
+    // Create the auth token for Jira API
+    const auth = Buffer.from(
+      `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+    ).toString("base64");
+
+    // Get the internal Jira ID from the ticket key
+    const idResult = await getJiraIssueId(ticket_key, auth);
+
+    if (!idResult.success || !idResult.id) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting internal ID for ticket ${ticket_key}: ${idResult.errorMessage}`,
+          },
+        ],
+      };
+    }
+
+    const issueId = idResult.id;
+    console.log(`Found internal ID for ticket ${ticket_key}: ${issueId}`);
+
+    // Get the test steps
+    // Make sure we have the project ID
+    const projectId = idResult.projectId;
+    if (!projectId) {
+      console.error("Project ID not found, cannot get test steps");
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error: Project ID not found for ticket ${ticket_key}`,
+          },
+        ],
+      };
+    }
+
+    const result = await getZephyrTestSteps(issueId, projectId);
+
+    if (!result.success) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting test steps for ticket ${ticket_key}: ${result.errorMessage}`,
+          },
+        ],
+      };
+    }
+
+    // Check if we have test steps
+    if (!result.steps || result.steps.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No test steps found for ticket ${ticket_key}.`,
+          },
+        ],
+      };
+    }
+
+    // Format the test steps
+    const formattedSteps = result.steps.map((step) => ({
+      id: step.id,
+      orderId: step.orderId,
+      step: step.step,
+      data: step.data || "",
+      result: step.result || "",
+    }));
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Found ${
+            formattedSteps.length
+          } test step(s) for ticket ${ticket_key}:\n\n${JSON.stringify(
+            formattedSteps,
+            null,
+            2
+          )}`,
+        },
+      ],
+    };
+  }
+);
+
 // Register new tool for adding test steps
 server.tool(
   "add-test-steps",
@@ -1090,13 +1227,33 @@ server.tool(
     console.log(`Found internal ID for ticket ${ticket_key}: ${issueId}`);
 
     // Add each test step
-    const results = [];
+    const results: string[] = [];
     let allSuccessful = true;
 
     for (const [index, { step, data = "", result = "" }] of steps.entries()) {
       console.log(`Adding test step ${index + 1}/${steps.length}: ${step}`);
 
-      const stepResult = await addZephyrTestStep(issueId, step, data, result);
+      // Pass the project ID to the addZephyrTestStep function
+      const projectId = idResult.projectId;
+      if (!projectId) {
+        console.error("Project ID not found, cannot add test steps");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: Project ID not found for ticket ${ticket_key}`,
+            },
+          ],
+        };
+      }
+
+      const stepResult = await addZephyrTestStep(
+        issueId,
+        projectId,
+        step,
+        data,
+        result
+      );
 
       if (stepResult.success) {
         results.push(`Step ${index + 1}: Added successfully`);
