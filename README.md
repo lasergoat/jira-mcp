@@ -149,7 +149,6 @@ These environment variables are required for the Zephyr integration to add test 
 - `ZAPI_BASE_URL`: The base URL for the Zephyr API (default: "https://prod-api.zephyr4jiracloud.com/connect")
 - `ZAPI_ACCESS_KEY`: Your Zephyr Access Key (found in Zephyr Cloud settings under API Keys)
 - `ZAPI_SECRET_KEY`: Your Zephyr Secret Key (found in Zephyr Cloud settings under API Keys)
-- `ZAPI_ACCOUNT_ID`: Your Atlassian Account ID
 - `ZAPI_JWT_EXPIRE_SEC`: JWT token expiration time in seconds (default: 3600)
 
 #### Custom Field Configuration
