@@ -174,14 +174,14 @@ export function registerJiraTools(server: McpServer) {
       const result = await createJiraTicket(payload, auth);
 
       if (!result.success) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error creating ticket: ${result.errorMessage}`,
-            },
-          ],
-        };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error creating ticket: ${result.errorMessage}`,
+          },
+        ],
+      };
       }
 
       // Extract the ticket key/number from the response
@@ -245,7 +245,7 @@ export function registerJiraTools(server: McpServer) {
       return {
         content: [
           {
-            type: "text",
+            type: "text" as const,
             text: responseText,
           },
         ],
@@ -280,20 +280,20 @@ export function registerJiraTools(server: McpServer) {
       );
 
       if (!result.success) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error linking tickets: ${result.errorMessage}`,
-            },
-          ],
-        };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error linking tickets: ${result.errorMessage}`,
+          },
+        ],
+      };
       }
 
       return {
         content: [
           {
-            type: "text",
+            type: "text" as const,
             text: `Successfully linked ${outward_issue} to ${inward_issue} with link type "${link_type}"`,
           },
         ],
@@ -338,7 +338,7 @@ export function registerJiraTools(server: McpServer) {
           return {
             content: [
               {
-                type: "text",
+                type: "text" as const,
                 text: `Error fetching ticket: ${
                   responseData.errorMessages?.join(", ") || "Unknown error"
                 }`,
@@ -351,7 +351,7 @@ export function registerJiraTools(server: McpServer) {
           return {
             content: [
               {
-                type: "text",
+                type: "text" as const,
                 text: "Error: No ticket fields found in response",
               },
             ],
@@ -361,7 +361,7 @@ export function registerJiraTools(server: McpServer) {
         return {
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: `JIRA Ticket: ${ticket_id}, Fields: ${JSON.stringify(
                 responseData.fields,
                 null,
@@ -375,7 +375,7 @@ export function registerJiraTools(server: McpServer) {
         return {
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: `Error fetching ticket: ${
                 error instanceof Error ? error.message : String(error)
               }`,
@@ -416,7 +416,7 @@ export function registerJiraTools(server: McpServer) {
         return {
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: `Error searching tickets: ${result.errorMessage}`,
             },
           ],
@@ -428,7 +428,7 @@ export function registerJiraTools(server: McpServer) {
         return {
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: `No ${issue_type} tickets found matching the criteria.`,
             },
           ],
@@ -446,7 +446,7 @@ export function registerJiraTools(server: McpServer) {
       return {
         content: [
           {
-            type: "text",
+            type: "text" as const,
             text: `Found ${result.data.total} ${issue_type} tickets (showing ${
               tickets.length
             }):\n\n${JSON.stringify(tickets, null, 2)}`,
@@ -462,10 +462,13 @@ export function registerJiraTools(server: McpServer) {
     "Update an existing jira ticket",
     {
       ticket_key: z.string().min(1, "Ticket key is required"),
+      description: z.string().optional(),
+      acceptance_criteria: z.string().optional(),
+      story_points: z.number().optional(),
       sprint: z.string().optional(),
       story_readiness: z.enum(["Yes", "No"]).optional(),
     },
-    async ({ ticket_key, sprint, story_readiness }) => {
+    async ({ ticket_key, description, acceptance_criteria, story_points, sprint, story_readiness }) => {
       // Create the auth token
       const auth = Buffer.from(
         `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
@@ -475,6 +478,30 @@ export function registerJiraTools(server: McpServer) {
       const payload: any = {
         fields: {},
       };
+
+      // Add description if provided
+      if (description !== undefined) {
+        payload.fields.description = formatDescription(description);
+      }
+
+      // Add acceptance criteria if provided
+      if (acceptance_criteria !== undefined) {
+        // Using environment variable for acceptance criteria field
+        const acceptanceCriteriaField =
+          process.env.JIRA_ACCEPTANCE_CRITERIA_FIELD || "customfield_10429";
+
+        // Format and add acceptance criteria to the custom field
+        payload.fields[acceptanceCriteriaField] =
+          formatAcceptanceCriteria(acceptance_criteria);
+      }
+
+      // Add story points if provided
+      if (story_points !== undefined) {
+        // Using environment variable for story points field
+        const storyPointsField =
+          process.env.JIRA_STORY_POINTS_FIELD || "customfield_10040";
+        payload.fields[storyPointsField] = story_points;
+      }
 
       // Add sprint if provided
       if (sprint !== undefined) {
@@ -502,8 +529,8 @@ export function registerJiraTools(server: McpServer) {
         return {
           content: [
             {
-              type: "text",
-              text: "Error: At least one field to update must be provided",
+              type: "text" as const,
+              text: "Error: At least one field to update must be provided(description, acceptance_criteria, story_points, sprint, story_readiness).",
             },
           ],
         };
@@ -516,7 +543,7 @@ export function registerJiraTools(server: McpServer) {
         return {
           content: [
             {
-              type: "text",
+              type: "text" as const,
               text: `Error updating ticket: ${result.errorMessage}`,
             },
           ],
@@ -525,6 +552,15 @@ export function registerJiraTools(server: McpServer) {
 
       // Build response text
       let responseText = `Successfully updated ticket ${ticket_key}`;
+      if (description !== undefined) {
+        responseText += `, description updated`;
+      }
+      if (acceptance_criteria !== undefined) {
+        responseText += `, acceptance criteria updated`;
+      }
+      if (story_points !== undefined) {
+        responseText += `, story points: ${story_points}`;
+      }
       if (sprint !== undefined) {
         responseText += `, sprint: ${sprint}`;
       }
@@ -535,7 +571,7 @@ export function registerJiraTools(server: McpServer) {
       return {
         content: [
           {
-            type: "text",
+            type: "text" as const,
             text: responseText,
           },
         ],
