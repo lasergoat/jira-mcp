@@ -74,10 +74,10 @@ export function registerJiraTools(server: McpServer) {
           formatAcceptanceCriteria(acceptance_criteria);
 
         // Log for debugging
-        console.log(
+        console.error(
           `Adding acceptance criteria to field ${acceptanceCriteriaField}`
         );
-        console.log(
+        console.error(
           "Formatted acceptance criteria:",
           JSON.stringify(formatAcceptanceCriteria(acceptance_criteria), null, 2)
         );

@@ -31,16 +31,16 @@ export async function getZephyrTestSteps(
   // Full URL with query parameters
   const fullUrl = `${baseUrl}${apiPath}?${queryString}`;
 
-  console.log("Zephyr URL for getting test steps:", fullUrl);
-  console.log("Zephyr API Path:", apiPath);
-  console.log("Issue ID:", issueId);
-  console.log("Project ID:", projectId);
-  console.log("Query Parameters:", queryParams);
+  console.error("Zephyr URL for getting test steps:", fullUrl);
+  console.error("Zephyr API Path:", apiPath);
+  console.error("Issue ID:", issueId);
+  console.error("Project ID:", projectId);
+  console.error("Query Parameters:", queryParams);
 
   try {
     // Generate JWT for this specific API call with query parameters
     const jwtToken = generateZephyrJwt("GET", apiPath, queryParams);
-    console.log("Generated JWT token for Zephyr API");
+    console.error("Generated JWT token for Zephyr API");
 
     // Log headers for debugging
     const headers = {
@@ -48,19 +48,19 @@ export async function getZephyrTestSteps(
       zapiAccessKey: process.env.ZAPI_ACCESS_KEY || "",
       Authorization: `JWT ${jwtToken}`,
     };
-    console.log("Request headers:", JSON.stringify(headers, null, 2));
+    console.error("Request headers:", JSON.stringify(headers, null, 2));
 
     const response = await fetch(fullUrl, {
       method: "GET",
       headers,
     });
 
-    console.log("Response status:", response.status, response.statusText);
+    console.error("Response status:", response.status, response.statusText);
 
     // Clone the response to read it twice
     const responseClone = response.clone();
     const responseText = await responseClone.text();
-    console.log("Full response body:", responseText);
+    console.error("Full response body:", responseText);
 
     let responseData;
     try {
@@ -141,8 +141,8 @@ export async function addZephyrTestStep(
   // Full URL with query parameters
   const fullUrl = `${baseUrl}${apiPath}?${queryString}`;
 
-  console.log("Zephyr URL:", fullUrl);
-  console.log(
+  console.error("Zephyr URL:", fullUrl);
+  console.error(
     "Zephyr Payload:",
     JSON.stringify({ projectId, step, data, result }, null, 2)
   );

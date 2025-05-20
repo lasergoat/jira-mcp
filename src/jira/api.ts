@@ -12,9 +12,9 @@ export async function updateJiraTicket(
 }> {
   const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}`;
 
-  console.log("JIRA Update URL:", jiraUrl);
-  console.log("JIRA Update Payload:", JSON.stringify(payload, null, 2));
-  console.log("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
+  console.error("JIRA Update URL:", jiraUrl);
+  console.error("JIRA Update Payload:", JSON.stringify(payload, null, 2));
+  console.error("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
 
   try {
     const response = await fetch(jiraUrl, {
@@ -70,10 +70,10 @@ export async function createJiraTicket(
 }> {
   const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue`;
 
-  console.log("JIRA URL:", jiraUrl);
-  console.log("JIRA Payload:", JSON.stringify(payload, null, 2));
-  console.log("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
-  console.log("JIRA Project Key:", process.env.JIRA_PROJECT_KEY);
+  console.error("JIRA URL:", jiraUrl);
+  console.error("JIRA Payload:", JSON.stringify(payload, null, 2));
+  console.error("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
+  console.error("JIRA Project Key:", process.env.JIRA_PROJECT_KEY);
 
   try {
     const response = await fetch(jiraUrl, {
@@ -140,8 +140,8 @@ export async function createTicketLink(
     },
   };
 
-  console.log("Creating link between", outwardIssue, "and", inwardIssue);
-  console.log("Link payload:", JSON.stringify(payload, null, 2));
+  console.error("Creating link between", outwardIssue, "and", inwardIssue);
+  console.error("Link payload:", JSON.stringify(payload, null, 2));
 
   try {
     const response = await fetch(jiraUrl, {
@@ -191,9 +191,9 @@ export async function searchJiraTickets(
     process.env.JIRA_HOST
   }/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}`;
 
-  console.log("JIRA Search URL:", jiraUrl);
-  console.log("JIRA Search JQL:", jql);
-  console.log("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
+  console.error("JIRA Search URL:", jiraUrl);
+  console.error("JIRA Search JQL:", jql);
+  console.error("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
 
   try {
     const response = await fetch(jiraUrl, {

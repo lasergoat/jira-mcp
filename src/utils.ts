@@ -52,9 +52,9 @@ export async function getJiraIssueId(
     // Extract project ID from the response
     const projectId = responseData.fields?.project?.id;
     if (!projectId) {
-      console.log("Warning: Project ID not found in response");
+      console.error("Warning: Project ID not found in response");
     } else {
-      console.log(`Found project ID: ${projectId}`);
+      console.error(`Found project ID: ${projectId}`);
     }
 
     return {

@@ -33,7 +33,7 @@ export function registerZephyrTools(server: McpServer) {
       }
 
       const issueId = idResult.id;
-      console.log(`Found internal ID for ticket ${ticket_key}: ${issueId}`);
+      console.error(`Found internal ID for ticket ${ticket_key}: ${issueId}`);
 
       // Get the test steps
       // Make sure we have the project ID
@@ -138,7 +138,7 @@ export function registerZephyrTools(server: McpServer) {
       }
 
       const issueId = idResult.id;
-      console.log(`Found internal ID for ticket ${ticket_key}: ${issueId}`);
+      console.error(`Found internal ID for ticket ${ticket_key}: ${issueId}`);
 
       // Add each test step
       const results: string[] = [];
@@ -148,7 +148,7 @@ export function registerZephyrTools(server: McpServer) {
         const step: string = stepObj.step;
         const data: string = stepObj.data || "";
         const result: string = stepObj.result || "";
-        console.log(`Adding test step ${index + 1}/${steps.length}: ${step}`);
+        console.error(`Adding test step ${index + 1}/${steps.length}: ${step}`);
 
         // Pass the project ID to the addZephyrTestStep function
         const projectId = idResult.projectId;
