@@ -9,7 +9,6 @@
         "JIRA_API_TOKEN": "your_api_token",
         "JIRA_PROJECT_KEY": "your_project_key",
         
-        "// Test Ticket Creation": "Optional configuration for automatic test ticket creation",
         "AUTO_CREATE_TEST_TICKETS": "true",
 
         "JIRA_ACCEPTANCE_CRITERIA_FIELD": "customfield_10429",
