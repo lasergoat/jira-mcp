@@ -2,11 +2,16 @@
 
 A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol) server for integrating JIRA with Claude. This tool allows Claude to create JIRA tickets directly within your conversations.
 
+## Overview
+
+The JIRA MCP project is a Node.js/TypeScript application that provides a Model Context Protocol (MCP) server for integrating with JIRA and Zephyr. It allows AI assistants to interact with JIRA for project management and Zephyr for test management through a standardized protocol.
+
 <img width="772" alt="grafik" src="https://github.com/user-attachments/assets/a6f9afd8-7f75-4316-9421-ee7126002d2b" />
 <img width="1188" alt="grafik" src="https://github.com/user-attachments/assets/b8f089ac-4443-4a64-91c0-87b97175d9dd" />
 
 ## Table of Contents
 
+- [Overview](#overview)
 - [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
@@ -30,10 +35,11 @@ A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol
   - [link-tickets](#link-tickets)
   - [get-test-steps](#get-test-steps)
   - [add-test-steps](#add-test-steps)
-- [Test Files](#test-files)
-  - [Available Test Files](#available-test-files)
-  - [Running the Tests](#running-the-tests)
-  - [Test File Usage](#test-file-usage)
+- [Project Architecture](#project-architecture)
+- [Core Components](#core-components)
+- [Authentication](#authentication)
+- [Data Formatting](#data-formatting)
+- [Error Handling](#error-handling)
 - [Utility Scripts](#utility-scripts)
   - [update-mcp-settings.js](#update-mcp-settingsjs)
 - [Usage with Claude](#usage-with-claude)
@@ -69,7 +75,9 @@ A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol
 
 3. Build the project:
    ```
-   npm run build
+    npm run build -- on unix systems
+    -- or --
+    npm run build-win -- on windows systems
    ```
 
 ## Configuration
@@ -392,67 +400,122 @@ Adds test steps to a test ticket via the Zephyr integration.
 
 This tool requires Zephyr for Jira Cloud to be installed and configured. You'll need to set the Zephyr API environment variables in your configuration file.
 
-## Test Files
 
-The project includes several test files in the `test` directory that were used during development to test different aspects of the JIRA and Zephyr API integration. These files can be useful for understanding how the APIs work and for troubleshooting issues.
+## Project Architecture
 
-### Available Test Files
+The project follows a modular architecture with clear separation of concerns:
 
-#### test-add-steps.js
-
-Tests the functionality for adding test steps to a Zephyr test in JIRA.
-- Implements JWT token generation for Zephyr API authentication
-- Contains functions to get JIRA issue IDs and add test steps to Zephyr tests
-- Includes sample test data for demonstration purposes
-
-#### test-get-steps.js
-
-Tests retrieving test steps from a Zephyr test in JIRA.
-- Imports functions from the compiled TypeScript code
-- Demonstrates how to fetch and display test steps from an existing test ticket
-
-#### test-endpoints.js
-
-Tests different API endpoint formats for the Zephyr API.
-- Systematically tries multiple endpoint URL patterns to determine which ones work
-- Helps identify the correct API endpoint format for Zephyr Squad Cloud
-
-#### query-issue.js
-
-Tests basic JIRA ticket querying functionality.
-- Demonstrates how to fetch a JIRA ticket's details using the JIRA REST API
-- Displays ticket information including ID, key, summary, type, and status
-
-#### test-with-project-id.js
-
-Tests the Zephyr API with a project ID parameter.
-- Demonstrates that the project ID is required for Zephyr API calls
-- Shows the correct format for including the project ID in API requests
-
-### Running the Tests
-
-To run any of these test files, you'll need to:
-
-1. Make sure you have set up your environment variables (in a `.env` file or directly in your environment)
-2. Build the project with `npm run build`
-3. Run a specific test with Node.js:
-
-```bash
-node test/test-add-steps.js
+```
+jira-mcp/
+├── src/                      # Source code
+│   ├── index.ts              # Main entry point
+│   ├── utils.ts              # Shared utility functions
+│   ├── jira/                 # JIRA integration module
+│   │   ├── api.ts            # JIRA API interaction functions
+│   │   ├── formatting.ts     # JIRA content formatting utilities
+│   │   ├── index.ts          # JIRA module exports
+│   │   ├── tools.ts          # JIRA MCP tools registration
+│   │   └── types.ts          # JIRA type definitions
+│   └── zephyr/               # Zephyr integration module
+│       ├── auth.ts           # Zephyr authentication utilities
+│       ├── index.ts          # Zephyr module exports
+│       ├── test-steps.ts     # Zephyr test steps API functions
+│       ├── tools.ts          # Zephyr MCP tools registration
+│       └── types.ts          # Zephyr type definitions
+├── util/                     # Utility scripts
+│   └── update-mcp-settings.js # Script to update MCP settings
+├── package.json              # Project metadata and dependencies
+└── tsconfig.json             # TypeScript configuration
 ```
 
-Replace `test-add-steps.js` with the name of the test file you want to run.
+## Core Components
 
-### Test File Usage
+### MCP Server
 
-These test files serve several purposes:
+The application creates an MCP server using the `@modelcontextprotocol/sdk` package. This server exposes tools that can be used by AI assistants to interact with JIRA and Zephyr.
 
-1. **API Exploration**: Files like `test-endpoints.js` were used to explore and understand the APIs.
-2. **Function Development**: Core functions were developed and tested in standalone JavaScript files.
-3. **Troubleshooting**: These files can be modified and used to troubleshoot specific API issues.
-4. **Example Code**: They provide examples of how to interact with the JIRA and Zephyr APIs.
+```typescript
+// src/index.ts
+const server = new McpServer({
+  name: "jira-mcp",
+  version: "1.0.0",
+});
 
-The functions developed and tested in these files form the foundation for the MCP server tools defined in the main source code.
+// Register tools
+registerJiraTools(server);
+registerZephyrTools(server);
+
+// Connect using stdio transport
+const transport = new StdioServerTransport();
+await server.connect(transport);
+```
+
+### JIRA Integration
+
+The JIRA integration module provides tools for interacting with the JIRA REST API:
+
+1. **create-ticket**: Creates a new JIRA ticket with customizable fields
+2. **link-tickets**: Links two JIRA tickets together with a specified relationship
+3. **get-ticket**: Retrieves information about a specific JIRA ticket
+4. **search-tickets**: Searches for JIRA tickets using JQL (JIRA Query Language)
+5. **update-ticket**: Updates an existing JIRA ticket with new information
+
+The module uses Basic Authentication with the JIRA API and formats content according to JIRA's Atlassian Document Format (ADF).
+
+### Zephyr Integration
+
+The Zephyr integration module provides tools for managing test steps in Zephyr:
+
+1. **get-test-steps**: Retrieves test steps for a specific test ticket
+2. **add-test-steps**: Adds test steps to a test ticket
+
+The module uses JWT authentication with the Zephyr API, generating signed tokens for each request.
+
+
+## Authentication
+
+### JIRA Authentication
+
+JIRA authentication uses Basic Auth with a username and API token:
+
+```typescript
+const auth = Buffer.from(
+  `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+).toString("base64");
+```
+
+### Zephyr Authentication
+
+Zephyr authentication uses JWT tokens generated with a specific algorithm:
+
+```typescript
+// Generate JWT for Zephyr API
+const jwtToken = generateZephyrJwt("GET", apiPath, queryParams);
+```
+
+The JWT generation includes:
+1. Creating a canonical string from the request method, path, and query parameters
+2. Generating a SHA-256 hash of this string
+3. Creating a JWT with claims including the hash, account ID, and timestamps
+4. Signing the JWT with HMAC-SHA256 using the Zephyr Secret Key
+
+## Data Formatting
+
+The project includes utilities for formatting data according to JIRA's requirements:
+
+- **formatDescription**: Formats text for JIRA ticket descriptions
+- **formatAcceptanceCriteria**: Formats acceptance criteria with proper bullet points
+
+These utilities create JSON structures that conform to JIRA's Atlassian Document Format (ADF).
+
+## Error Handling
+
+The application includes comprehensive error handling throughout:
+
+- API responses are checked for success status codes
+- Error messages are extracted from API responses when available
+- Exceptions are caught and logged
+- Error information is returned to the client in a consistent format
 
 ## Utility Scripts
 

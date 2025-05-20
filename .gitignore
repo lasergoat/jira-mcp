@@ -32,6 +32,5 @@ ehthumbs.db
 Thumbs.db
 
 # Configuration files
-jira-mcp-config-template.json
 merged-jira-mcp-config.json
 jira-mcp-minimal-config.json
