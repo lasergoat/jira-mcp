@@ -27,6 +27,7 @@ export function registerJiraTools(server: McpServer) {
       parent_epic: z.string().optional(),
       sprint: z.string().optional(),
       story_readiness: z.enum(["Yes", "No"]).optional(),
+      origination: z.string().optional(),
     },
     async ({
       summary,
@@ -38,6 +39,7 @@ export function registerJiraTools(server: McpServer) {
       parent_epic,
       sprint,
       story_readiness,
+      origination,
     }) => {
       const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue`;
 
@@ -123,6 +125,21 @@ export function registerJiraTools(server: McpServer) {
             };
           }
         }
+
+        // Add origination field if provided or use default from env
+        const originationField = process.env.JIRA_ORIGINATION_FIELD;
+        const defaultOrigination = origination || process.env.JIRA_DEFAULT_ORIGINATION_VALUE;
+        const originationId = process.env.JIRA_DEFAULT_ORIGINATION_ID;
+
+        if (originationField && defaultOrigination && originationId) {
+          payload.fields[originationField] = [
+            {
+              self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${originationId}`,
+              value: defaultOrigination,
+              id: originationId,
+            },
+          ];
+        }
       }
 
       // Add story points if provided
@@ -196,6 +213,10 @@ export function registerJiraTools(server: McpServer) {
 
       if (story_points !== undefined) {
         responseText += `, story points: ${story_points}`;
+      }
+
+      if (origination !== undefined) {
+        responseText += `, origination: ${origination}`;
       }
 
       // Create a test ticket if this is a Story with points and auto-creation is enabled
