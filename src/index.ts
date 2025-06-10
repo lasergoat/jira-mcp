@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerJiraTools } from "./jira/tools.js";
 import { registerZephyrTools } from "./zephyr/index.js";
+import { registerConfigTools } from "./config/tools.js";
 
 process.on("uncaughtException", (error) => {
   console.error("UNCAUGHT EXCEPTION:", error);
@@ -15,6 +16,9 @@ const server = new McpServer({
   name: "jira-mcp",
   version: "1.0.0",
 });
+
+// Register configuration tools
+registerConfigTools(server);
 
 // Register Jira tools
 registerJiraTools(server);
