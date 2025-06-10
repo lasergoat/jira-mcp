@@ -1,4 +1,5 @@
 import fetch from "node-fetch";
+import FormData from "form-data";
 import { JiraCreateResponse, JiraSearchResponse } from "./types.js";
 
 // Helper function to update a JIRA ticket
@@ -302,6 +303,94 @@ export async function addJiraComment(
     return { success: false, errorMessage };
   } catch (error) {
     console.error("Exception adding comment:", error);
+    return {
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// Helper function to upload attachments to a JIRA ticket
+export async function uploadJiraAttachment(
+  ticketKey: string,
+  fileName: string,
+  fileContent: Buffer | string,
+  mimeType: string,
+  auth: string
+): Promise<{
+  success: boolean;
+  attachments?: Array<{
+    id: string;
+    filename: string;
+    size: number;
+    mimeType: string;
+    content: string;
+  }>;
+  errorMessage?: string;
+}> {
+  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}/attachments`;
+
+  console.error("JIRA Attachment URL:", jiraUrl);
+  console.error("Uploading file:", fileName);
+
+  try {
+    // Create form data
+    const formData = new FormData();
+    
+    // Convert base64 to buffer if needed
+    const buffer = typeof fileContent === 'string' 
+      ? Buffer.from(fileContent, 'base64')
+      : fileContent;
+    
+    formData.append('file', buffer, {
+      filename: fileName,
+      contentType: mimeType,
+    });
+
+    const response = await fetch(jiraUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'X-Atlassian-Token': 'no-check',
+        ...formData.getHeaders(),
+      },
+      body: formData,
+    });
+
+    if (response.status === 200) {
+      const attachments = (await response.json()) as Array<{
+        id: string;
+        filename: string;
+        size: number;
+        mimeType: string;
+        content: string;
+      }>;
+      
+      console.error("Successfully uploaded attachment:", attachments);
+      return { success: true, attachments };
+    }
+
+    // If there's an error, try to parse the response
+    let errorMessage = `Status: ${response.status} ${response.statusText}`;
+    try {
+      const responseData = (await response.json()) as {
+        errorMessages?: string[];
+        errors?: Record<string, string>;
+      };
+      console.error("Error uploading attachment:", responseData);
+
+      if (responseData.errorMessages && responseData.errorMessages.length > 0) {
+        errorMessage = responseData.errorMessages.join(", ");
+      } else if (responseData.errors) {
+        errorMessage = JSON.stringify(responseData.errors);
+      }
+    } catch (parseError) {
+      console.error("Error parsing error response:", parseError);
+    }
+
+    return { success: false, errorMessage };
+  } catch (error) {
+    console.error("Exception uploading attachment:", error);
     return {
       success: false,
       errorMessage: error instanceof Error ? error.message : String(error),

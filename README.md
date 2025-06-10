@@ -60,6 +60,8 @@ The JIRA MCP project is a Node.js/TypeScript application that provides a Model C
 
 ## Installation
 
+### For Claude Desktop
+
 1. Clone the repository:
 
    ```
@@ -78,6 +80,46 @@ The JIRA MCP project is a Node.js/TypeScript application that provides a Model C
     npm run build -- on unix systems
     -- or --
     npm run build-win -- on windows systems
+   ```
+
+### For GitHub Copilot in VSCode
+
+1. First, ensure you've built the project locally:
+
+   ```bash
+   cd /Users/danielwalker/Projects/jira-mcp
+   npm install
+   npm run build
+   ```
+
+2. Add the MCP server to your VSCode configuration. In your VSCode settings, add:
+
+   ```json
+   "mcp": {
+     "servers": {
+       "Jira-Mcp-Local": {
+         "type": "stdio",
+         "command": "node",
+         "args": [
+           "/Users/danielwalker/Projects/jira-mcp/build/index.js"
+         ],
+         "env": {
+           "JIRA_HOST": "your-site.atlassian.net",
+           "JIRA_USERNAME": "your-email@example.com",
+           "JIRA_API_TOKEN": "your_api_token",
+           "JIRA_PROJECT_KEY": "VIP"
+         }
+       }
+     }
+   }
+   ```
+
+   Replace the environment values with your actual JIRA credentials and adjust the path if different.
+
+3. In GitHub Copilot's "Enter Command" interface, use:
+
+   ```
+   node /Users/danielwalker/Projects/jira-mcp/build/index.js
    ```
 
 ## Configuration
