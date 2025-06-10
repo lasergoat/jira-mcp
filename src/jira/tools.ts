@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import fetch from "node-fetch";
-import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket } from "./api.js";
+import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket, addJiraComment } from "./api.js";
 import { formatDescription, formatAcceptanceCriteria } from "./formatting.js";
 import { getJiraIssueId } from "../utils.js";
 import { 
@@ -781,6 +781,140 @@ ${description}`;
           {
             type: "text" as const,
             text: `Successfully updated ticket ${ticket_id}`,
+          },
+        ],
+      };
+    }
+  );
+
+  // Search sprint tickets tool
+  server.tool(
+    "search-sprint-tickets",
+    "Search for tickets in current sprint, optionally filtered by assignee",
+    {
+      project_key: z.string().optional(),
+      assignee: z.string().optional().describe("Email address or username to filter by assignee"),
+      sprint_name: z.string().optional().describe("Specific sprint name to search (if not provided, searches active sprints)"),
+      max_results: z.number().min(1).max(50).default(10),
+    },
+    async ({ project_key, assignee, sprint_name, max_results }) => {
+      // Build JQL query
+      let jql = "";
+      
+      if (project_key) {
+        jql += `project = "${project_key}"`;
+      }
+      
+      // Add sprint filter
+      if (sprint_name) {
+        if (jql) jql += " AND ";
+        jql += `sprint = "${sprint_name}"`;
+      } else {
+        if (jql) jql += " AND ";
+        jql += "sprint in openSprints()";
+      }
+      
+      // Add assignee filter if provided
+      if (assignee) {
+        jql += ` AND assignee = "${assignee}"`;
+      }
+      
+      // Order by priority and updated date
+      jql += " ORDER BY priority DESC, updated DESC";
+
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const result = await searchJiraTickets(jql, max_results as number, auth);
+
+      if (!result.success) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error searching sprint tickets: ${result.errorMessage}`,
+            },
+          ],
+        };
+      }
+
+      const issues = result.data.issues || [];
+      
+      if (issues.length === 0) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: "No tickets found matching the search criteria.",
+            },
+          ],
+        };
+      }
+
+      // Format the results
+      let output = `**Sprint Tickets (${issues.length} found)**\n\n`;
+      
+      issues.forEach((issue: any) => {
+        const assigneeName = issue.fields.assignee ? issue.fields.assignee.displayName : "Unassigned";
+        const priority = issue.fields.priority ? issue.fields.priority.name : "No Priority";
+        const status = issue.fields.status ? issue.fields.status.name : "No Status";
+        
+        output += `**${issue.key}** - ${issue.fields.summary}\n`;
+        output += `  Status: ${status} | Priority: ${priority} | Assignee: ${assigneeName}\n`;
+        
+        if (issue.fields.customfield_10020 && issue.fields.customfield_10020.length > 0) {
+          const sprint = issue.fields.customfield_10020[issue.fields.customfield_10020.length - 1];
+          if (sprint.name) {
+            output += `  Sprint: ${sprint.name}\n`;
+          }
+        }
+        
+        output += `  Link: https://${process.env.JIRA_HOST}/browse/${issue.key}\n\n`;
+      });
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: output,
+          },
+        ],
+      };
+    }
+  );
+
+  // Add comment tool
+  server.tool(
+    "add-comment",
+    "Add a comment to a jira ticket",
+    {
+      ticket_id: z.string().min(1, "Ticket ID is required"),
+      comment: z.string().min(1, "Comment text is required"),
+    },
+    async ({ ticket_id, comment }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const result = await addJiraComment(ticket_id, comment, auth);
+
+      if (!result.success) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error adding comment to ticket: ${result.errorMessage}`,
+            },
+          ],
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Successfully added comment to ticket ${ticket_id}`,
           },
         ],
       };
