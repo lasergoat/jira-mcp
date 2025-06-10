@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import fetch from "node-fetch";
-import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket, addJiraComment } from "./api.js";
+import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket, addJiraComment, uploadJiraAttachment } from "./api.js";
 import { formatDescription, formatAcceptanceCriteria } from "./formatting.js";
 import { getJiraIssueId } from "../utils.js";
 import { 
@@ -540,14 +540,15 @@ ${description}`;
   // Search tickets tool
   server.tool(
     "search-tickets",
-    "Search for jira tickets by issue type",
+    "Search for jira tickets by issue type and optional labels",
     {
       issue_type: z.enum(["Bug", "Task", "Story", "Test"]),
       max_results: z.number().min(1).max(50).default(10).optional(),
       additional_criteria: z.string().optional(),
       project_key: z.string().optional(),
+      labels: z.array(z.string()).optional().describe("Filter by specific labels"),
     },
-    async ({ issue_type, max_results = 10, additional_criteria, project_key }) => {
+    async ({ issue_type, max_results = 10, additional_criteria, project_key, labels }) => {
       // TODO: Add full dynamic configuration support
       const auth = Buffer.from(
         `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
@@ -556,6 +557,11 @@ ${description}`;
       const resolvedProjectKey = project_key || process.env.JIRA_PROJECT_KEY;
       
       let jql = `project = "${resolvedProjectKey}" AND issuetype = "${issue_type}"`;
+
+      if (labels && labels.length > 0) {
+        const labelQuery = labels.map(label => `"${label}"`).join(', ');
+        jql += ` AND labels in (${labelQuery})`;
+      }
 
       if (additional_criteria) {
         jql += ` AND (${additional_criteria})`;
@@ -611,7 +617,7 @@ ${description}`;
       description: z.string().optional(),
       acceptance_criteria: z.string().optional(),
       story_points: z.number().optional(),
-      parent_epic: z.string().optional(),
+      parent: z.string().optional(),
       sprint: z.string().optional(),
       story_readiness: z.enum(["Yes", "No"]).optional(),
       origination: z.string().optional(),
@@ -669,7 +675,7 @@ ${description}`;
       const fieldsToResolve = {
         acceptance_criteria: standardFields.acceptance_criteria,
         story_points: standardFields.story_points,
-        parent_epic: standardFields.parent_epic,
+        parent: standardFields.parent,
         sprint: standardFields.sprint,
         story_readiness: standardFields.story_readiness,
         origination: standardFields.origination,
@@ -689,11 +695,19 @@ ${description}`;
               case 'story_points':
                 payload.fields[fieldId] = value;
                 break;
-              case 'parent_epic':
+              case 'parent':
                 payload.fields[fieldId] = value;
                 break;
               case 'sprint':
-                payload.fields[fieldId] = [{ name: value }];
+                // Note: Jira API requires numeric sprint ID, not name
+                // This is a limitation - sprint names won't work properly
+                // TODO: Implement sprint name to ID lookup
+                if (!isNaN(Number(value))) {
+                  payload.fields[fieldId] = Number(value);
+                } else {
+                  console.error(`Sprint requires numeric ID, got: ${value}`);
+                  // Skip this field as it won't work with name
+                }
                 break;
               case 'story_readiness':
                 const storyReadinessId = value === "Yes" ? "18256" : "18257";
@@ -915,6 +929,63 @@ ${description}`;
           {
             type: "text" as const,
             text: `Successfully added comment to ticket ${ticket_id}`,
+          },
+        ],
+      };
+    }
+  );
+
+  // Upload attachment tool
+  server.tool(
+    "upload-attachment",
+    "Upload a file attachment to a jira ticket",
+    {
+      ticket_id: z.string().min(1, "Ticket ID is required"),
+      file_name: z.string().min(1, "File name is required"),
+      file_content: z.string().min(1, "File content (base64 encoded) is required"),
+      mime_type: z.string().default("application/octet-stream"),
+    },
+    async ({ ticket_id, file_name, file_content, mime_type }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const result = await uploadJiraAttachment(ticket_id, file_name, file_content, mime_type, auth);
+
+      if (!result.success) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error uploading attachment to ticket: ${result.errorMessage}`,
+            },
+          ],
+        };
+      }
+
+      // Format response with attachment details
+      let output = `Successfully uploaded attachment to ticket ${ticket_id}\n\n`;
+      
+      if (result.attachments && result.attachments.length > 0) {
+        result.attachments.forEach((attachment) => {
+          output += `**Attachment Details:**\n`;
+          output += `- File: ${attachment.filename}\n`;
+          output += `- Size: ${Math.round(attachment.size / 1024)} KB\n`;
+          output += `- Type: ${attachment.mimeType}\n`;
+          output += `- ID: ${attachment.id}\n\n`;
+          output += `**Reference in Jira:**\n`;
+          output += `To reference this attachment in comments or descriptions, use:\n`;
+          output += `!${attachment.filename}!\n\n`;
+          output += `**Download URL:**\n`;
+          output += `${attachment.content}\n`;
+        });
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: output,
           },
         ],
       };
