@@ -235,3 +235,76 @@ export async function searchJiraTickets(
     };
   }
 }
+
+// Helper function to add a comment to a JIRA ticket
+export async function addJiraComment(
+  ticketKey: string,
+  comment: string,
+  auth: string
+): Promise<{
+  success: boolean;
+  errorMessage?: string;
+}> {
+  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}/comment`;
+
+  console.error("JIRA Comment URL:", jiraUrl);
+  console.error("JIRA Comment:", comment);
+  console.error("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
+
+  try {
+    const response = await fetch(jiraUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+      body: JSON.stringify({
+        body: {
+          type: "doc",
+          version: 1,
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  text: comment,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+
+    if (response.status === 201) {
+      return { success: true };
+    }
+
+    // If there's an error, try to parse the response
+    let errorMessage = `Status: ${response.status} ${response.statusText}`;
+    try {
+      const responseData = (await response.json()) as {
+        errorMessages?: string[];
+        errors?: Record<string, string>;
+      };
+      console.error("Error adding comment:", responseData);
+
+      if (responseData.errorMessages && responseData.errorMessages.length > 0) {
+        errorMessage = responseData.errorMessages.join(", ");
+      } else if (responseData.errors) {
+        errorMessage = JSON.stringify(responseData.errors);
+      }
+    } catch (parseError) {
+      console.error("Error parsing error response:", parseError);
+    }
+
+    return { success: false, errorMessage };
+  } catch (error) {
+    console.error("Exception adding comment:", error);
+    return {
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
