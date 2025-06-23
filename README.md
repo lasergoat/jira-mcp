@@ -31,6 +31,7 @@ The JIRA MCP project is a Node.js/TypeScript application that provides a Model C
   - [create-ticket](#create-ticket)
   - [get-ticket](#get-ticket)
   - [search-tickets](#search-tickets)
+  - [search-sprints](#search-sprints)
   - [update-ticket](#update-ticket)
   - [link-tickets](#link-tickets)
   - [get-test-steps](#get-test-steps)
@@ -281,7 +282,7 @@ Creates a new JIRA ticket.
 - `story_points`: Story points for the ticket (optional, Fibonacci sequence: 1, 2, 3, 5, 8, 13, etc.)
 - `create_test_ticket`: Override the default setting for automatically creating a linked Test ticket (optional, boolean)
 - `parent_epic`: Key of the parent epic to link this ticket to (optional, e.g., "PROJ-123")
-- `sprint`: The name of the sprint to assign the ticket to (optional, e.g., "2025_C1_S07")
+- `sprint`: The sprint ID to assign the ticket to (optional, numeric ID - use search-sprints to find sprint IDs)
 - `story_readiness`: Whether the story is ready for development (optional, "Yes" or "No")
 
 When creating a Story ticket with story points:
@@ -301,7 +302,7 @@ When creating a Story ticket with story points:
   "acceptance_criteria": "- Users can log in with email and password\n- Password reset functionality works via email",
   "story_points": 5,
   "parent_epic": "PROJ-100",
-  "sprint": "2025_C1_S07",
+  "sprint": "1234",
   "story_readiness": "Yes"
 }
 ```
@@ -346,6 +347,33 @@ Searches for JIRA tickets by issue type and additional criteria.
 
 This tool allows you to find all tickets of a specific type in your JIRA project. You can further refine your search by providing additional JQL criteria.
 
+### search-sprints
+
+Searches for active and recent sprints to get sprint IDs for ticket assignment. **IMPORTANT:** LLMs should use this tool before assigning tickets to sprints.
+
+**Parameters:**
+
+- `project_key`: The project key to search sprints for (optional, uses default if not specified)
+- `include_future`: Include future sprints in results (optional, default: false)
+- `max_results`: Maximum number of results to return (optional, default: 10, max: 20)
+
+**Example:**
+
+```json
+{
+  "project_key": "VIP",
+  "include_future": true,
+  "max_results": 15
+}
+```
+
+This tool returns active and future sprints with their numeric IDs, which are required for sprint assignment. The response includes sprint names, states, and date ranges to help identify the correct sprint.
+
+**Usage Notes:**
+- Always use this tool before assigning tickets to sprints
+- Sprint assignment requires the numeric sprint ID, not the sprint name
+- The tool shows which sprints are currently active (🟢), future (🔵), or closed (⚫)
+
 ### update-ticket
 
 Updates an existing JIRA ticket with new field values.
@@ -353,7 +381,7 @@ Updates an existing JIRA ticket with new field values.
 **Parameters:**
 
 - `ticket_key`: The key of the JIRA ticket to update (required, e.g., "PROJ-123")
-- `sprint`: The name of the sprint to assign the ticket to (optional, e.g., "2025_C1_S07")
+- `sprint`: The sprint ID to assign the ticket to (optional, numeric ID - use search-sprints to find sprint IDs)
 - `story_readiness`: Whether the story is ready for development (optional, "Yes" or "No")
 
 **Example:**
@@ -361,7 +389,7 @@ Updates an existing JIRA ticket with new field values.
 ```json
 {
   "ticket_key": "PROJ-123",
-  "sprint": "2025_C1_S07",
+  "sprint": "1234",
   "story_readiness": "Yes"
 }
 ```
@@ -603,6 +631,29 @@ Create a JIRA ticket for implementing the new user authentication feature with t
 - Password reset functionality works via email
 - Account lockout occurs after 5 failed attempts
 - OAuth integration with Google and Facebook
+```
+
+### Sprint Assignment Workflow
+
+When you want to assign tickets to sprints, the LLM will automatically:
+
+1. First use `search-sprints` to discover available sprint IDs
+2. Present the active and future sprints to help you choose
+3. Use the numeric sprint ID (not name) for ticket assignment
+
+Example conversation:
+```
+User: "Create a story for user login and assign it to the current sprint"
+
+Claude: Let me first check what sprints are available...
+[Uses search-sprints tool]
+
+Claude: I found these active sprints:
+🟢 **Sprint 2025_C1_S07** (ID: 1234) - Active
+🔵 **Sprint 2025_C1_S08** (ID: 1235) - Future
+
+I'll assign the ticket to the current active sprint (ID: 1234).
+[Uses create-ticket with sprint: "1234"]
 ```
 
 Claude will use the create-ticket tool to generate a ticket in your JIRA project with all the specified details.

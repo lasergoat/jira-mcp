@@ -34,3 +34,4 @@ Thumbs.db
 # Configuration files
 merged-jira-mcp-config.json
 jira-mcp-minimal-config.json
+.claude/settings.local.json

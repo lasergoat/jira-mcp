@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import fetch from "node-fetch";
-import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket, addJiraComment, uploadJiraAttachment } from "./api.js";
+import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket, addJiraComment, uploadJiraAttachment, getJiraFields, getJiraTransitions, transitionJiraTicket, getJiraComments, getJiraAttachments, deleteJiraAttachment, getRawTicketData } from "./api.js";
+import { updateJiraComment, deleteJiraComment, getFullTicketDetails, searchJiraUsers } from "./api-extended.js";
+import { preferencesManager } from "./preferences.js";
 import { formatDescription, formatAcceptanceCriteria } from "./formatting.js";
 import { getJiraIssueId } from "../utils.js";
 import { 
@@ -82,10 +84,14 @@ export function registerJiraTools(server: McpServer) {
         const acceptanceCriteriaField = await fieldResolver.getFieldId(
           'acceptanceCriteria',
           'JIRA_ACCEPTANCE_CRITERIA_FIELD'
-        ) || process.env.JIRA_ACCEPTANCE_CRITERIA_FIELD || "customfield_10429";
+        );
 
-        payload.fields[acceptanceCriteriaField] =
-          formatAcceptanceCriteria(acceptance_criteria);
+        if (acceptanceCriteriaField) {
+          payload.fields[acceptanceCriteriaField] =
+            formatAcceptanceCriteria(acceptance_criteria);
+        } else {
+          console.warn('Acceptance criteria field not configured for project. Use get-project-schema to configure fields.');
+        }
 
         console.error(
           `Adding acceptance criteria to field ${acceptanceCriteriaField}`
@@ -150,14 +156,17 @@ export function registerJiraTools(server: McpServer) {
       }
 
       // Add story points if provided
-      if (story_points !== undefined && issue_type === "Story") {
+      if (story_points !== undefined) {
         const storyPointsField = await fieldResolver.getFieldId(
           'storyPoints',
           'JIRA_STORY_POINTS_FIELD'
-        ) || process.env.JIRA_STORY_POINTS_FIELD || "customfield_10040";
+        );
         
-        payload.fields[storyPointsField] = story_points;
-        payload.fields.labels = ["QA-Testable"];
+        if (storyPointsField) {
+          payload.fields[storyPointsField] = story_points;
+        } else {
+          console.warn('Story points field not configured for project. Use get-project-schema to configure fields.');
+        }
       }
 
       // Add parent epic if provided
@@ -165,34 +174,52 @@ export function registerJiraTools(server: McpServer) {
         const epicLinkField = await fieldResolver.getFieldId(
           'epicLink',
           'JIRA_EPIC_LINK_FIELD'
-        ) || process.env.JIRA_EPIC_LINK_FIELD || "customfield_10014";
+        );
         
-        payload.fields[epicLinkField] = parent_epic;
+        if (epicLinkField) {
+          payload.fields[epicLinkField] = parent_epic;
+        } else {
+          console.warn('Epic link field not configured for project. Use get-project-schema to configure fields.');
+        }
       }
 
       // Add sprint if provided
       if (sprint !== undefined) {
-        const sprintField = await fieldResolver.getFieldId('sprint', 'JIRA_SPRINT_FIELD') 
-          || "customfield_10020";
+        const sprintField = await fieldResolver.getFieldId('sprint', 'JIRA_SPRINT_FIELD');
         
-        payload.fields[sprintField] = [
-          {
-            name: sprint,
-          },
-        ];
+        if (sprintField) {
+          // Jira API requires numeric sprint ID, not name
+          if (!isNaN(Number(sprint))) {
+            payload.fields[sprintField] = Number(sprint);
+          } else {
+            console.warn(`Sprint field requires numeric ID. Use search-sprints to find sprint IDs. Got: ${sprint}`);
+            // Try to extract ID if it looks like "123" or numeric string
+            const numericValue = parseInt(String(sprint));
+            if (!isNaN(numericValue)) {
+              payload.fields[sprintField] = numericValue;
+            } else {
+              console.error(`Skipping sprint field - invalid format: ${sprint}`);
+            }
+          }
+        } else {
+          console.warn('Sprint field not configured for project. Use get-project-schema to configure fields.');
+        }
       }
 
       // Add story readiness if provided
       if (story_readiness !== undefined) {
-        const storyReadinessField = await fieldResolver.getFieldId('storyReadiness', 'JIRA_STORY_READINESS_FIELD')
-          || "customfield_10596";
+        const storyReadinessField = await fieldResolver.getFieldId('storyReadiness', 'JIRA_STORY_READINESS_FIELD');
         
-        const storyReadinessId = story_readiness === "Yes" ? "18256" : "18257";
-        payload.fields[storyReadinessField] = {
-          self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${storyReadinessId}`,
-          value: story_readiness,
-          id: storyReadinessId,
-        };
+        if (storyReadinessField) {
+          const storyReadinessId = story_readiness === "Yes" ? "18256" : "18257";
+          payload.fields[storyReadinessField] = {
+            self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${storyReadinessId}`,
+            value: story_readiness,
+            id: storyReadinessId,
+          };
+        } else {
+          console.warn('Story readiness field not configured for project. Use get-project-schema to configure fields.');
+        }
       }
 
       // Check if we have configuration errors
@@ -327,14 +354,43 @@ export function registerJiraTools(server: McpServer) {
         }
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: responseText,
-          },
-        ],
-      };
+      // Get full ticket details with transitions
+      const authForDetails = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+      
+      const detailsResult = await getFullTicketDetails(result.data.key || '', authForDetails);
+      
+      if (detailsResult.success) {
+        let fullResponse = `Successfully created ticket!\n\n${detailsResult.ticketDetails}`;
+        
+        // Add test ticket info if created
+        if (responseText.includes("Also created test ticket:")) {
+          const testTicketMatch = responseText.match(/Also created test ticket: ([\w-]+)/);
+          if (testTicketMatch) {
+            fullResponse += `\n\n**Also created test ticket:** ${testTicketMatch[1]}`;
+          }
+        }
+        
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: fullResponse,
+            },
+          ],
+        };
+      } else {
+        // Fallback to simple response if full details fail
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: responseText,
+            },
+          ],
+        };
+      }
     }
   );
 
@@ -410,14 +466,107 @@ export function registerJiraTools(server: McpServer) {
     }
   );
 
+  // Debug Raw Ticket Data tool - temporary tool for investigating custom fields
+  server.tool(
+    "get-ticket-raw",
+    "Get raw jira ticket data for debugging custom fields",
+    {
+      ticket_id: z.string().min(1, "Ticket ID is required"),
+    },
+    async ({ ticket_id }) => {
+      const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticket_id}`;
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      try {
+        const response = await fetch(jiraUrl, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${auth}`,
+          },
+        });
+
+        const responseData = await response.json() as any;
+
+        if (!response.ok) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Error fetching ticket: ${JSON.stringify(responseData, null, 2)}`,
+              },
+            ],
+          };
+        }
+
+        // Find all custom fields that have a numeric value of 5
+        const fields = responseData.fields || {};
+        const customFieldsWithValue5: any[] = [];
+        const allCustomFields: any[] = [];
+        
+        for (const [fieldId, value] of Object.entries(fields)) {
+          if (fieldId.startsWith('customfield_')) {
+            allCustomFields.push({ fieldId, value });
+            if (value === 5 || (typeof value === 'number' && value === 5)) {
+              customFieldsWithValue5.push({ fieldId, value });
+            }
+          }
+        }
+
+        let debugOutput = `**RAW JIRA DATA FOR TICKET: ${ticket_id}**\n\n`;
+        
+        // Show fields with value 5
+        if (customFieldsWithValue5.length > 0) {
+          debugOutput += `**CUSTOM FIELDS WITH VALUE 5:**\n`;
+          customFieldsWithValue5.forEach(field => {
+            debugOutput += `- ${field.fieldId}: ${JSON.stringify(field.value)}\n`;
+          });
+          debugOutput += '\n';
+        } else {
+          debugOutput += `**NO CUSTOM FIELDS WITH VALUE 5 FOUND**\n\n`;
+        }
+
+        // Show all custom fields for reference
+        debugOutput += `**ALL CUSTOM FIELDS (${allCustomFields.length} total):**\n`;
+        allCustomFields.forEach(field => {
+          debugOutput += `- ${field.fieldId}: ${JSON.stringify(field.value)}\n`;
+        });
+        
+        debugOutput += `\n**COMPLETE RAW JSON (fields only):**\n`;
+        debugOutput += `\`\`\`json\n${JSON.stringify(fields, null, 2)}\n\`\`\``;
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: debugOutput,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error fetching ticket: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
   // Get ticket tool
   server.tool(
     "get-ticket",
     "Get a jira ticket",
     {
       ticket_id: z.string().min(1, "Ticket ID is required"),
+      include_comments: z.boolean().optional().describe("Include comments in the response (default: false)"),
     },
-    async ({ ticket_id }) => {
+    async ({ ticket_id, include_comments }) => {
       // TODO: Add dynamic configuration support
       const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticket_id}`;
       const auth = Buffer.from(
@@ -475,12 +624,20 @@ export function registerJiraTools(server: McpServer) {
         const assignee = fields.assignee?.displayName || 'Unassigned';
         const priority = fields.priority?.name || 'Unknown';
         const issueType = fields.issuetype?.name || 'Unknown';
-        const epic = fields.parent?.key || fields.customfield_10014 || 'No epic';
+        // Get epic field dynamically
+        const fieldResolver = new DynamicFieldResolver();
+        const resolvedProjectKey = extractProjectKey(undefined, ticket_id);
+        if (resolvedProjectKey) {
+          fieldResolver.setProjectKey(resolvedProjectKey);
+        }
+        const epicField = await fieldResolver.getFieldId('epicLink', 'JIRA_EPIC_LINK_FIELD');
+        const epic = fields.parent?.key || (epicField ? fields[epicField] : null) || 'No epic';
         
-        // Extract sprint information (usually in customfield_10010)
+        // Extract sprint information dynamically
         let sprint = 'No sprint';
-        if (fields.customfield_10010 && Array.isArray(fields.customfield_10010) && fields.customfield_10010.length > 0) {
-          sprint = fields.customfield_10010[0].name || 'No sprint';
+        const sprintField = await fieldResolver.getFieldId('sprint', 'JIRA_SPRINT_FIELD');
+        if (sprintField && fields[sprintField] && Array.isArray(fields[sprintField]) && fields[sprintField].length > 0) {
+          sprint = fields[sprintField][0].name || 'No sprint';
         }
         
         // Format description (handle Atlassian Document Format)
@@ -500,7 +657,11 @@ export function registerJiraTools(server: McpServer) {
             .trim() || 'No description';
         }
 
-        const formattedOutput = `**JIRA Ticket: ${ticket_id}**
+        // Get story points dynamically
+        const storyPointsField = await fieldResolver.getFieldId('storyPoints', 'JIRA_STORY_POINTS_FIELD');
+        const storyPoints = (storyPointsField ? fields[storyPointsField] : null) || 'No story points';
+
+        let formattedOutput = `**JIRA Ticket: ${ticket_id}**
 
 **Summary:** ${summary}
 **Status:** ${status}
@@ -509,9 +670,51 @@ export function registerJiraTools(server: McpServer) {
 **Issue Type:** ${issueType}
 **Epic:** ${epic}
 **Sprint:** ${sprint}
+**Story Points:** ${storyPoints}
 
 **Description:**
 ${description}`;
+
+        // Fetch comments if requested
+        if (include_comments) {
+          try {
+            const commentsResult = await getJiraComments(ticket_id, auth);
+            if (commentsResult.success && commentsResult.comments && commentsResult.comments.length > 0) {
+              formattedOutput += `\n\n**Comments (${commentsResult.comments.length}):**\n`;
+              
+              commentsResult.comments.forEach((comment, index) => {
+                const author = comment.author?.displayName || 'Unknown';
+                const created = new Date(comment.created).toLocaleString();
+                const updated = comment.updated !== comment.created 
+                  ? ` (edited ${new Date(comment.updated).toLocaleString()})` 
+                  : '';
+                
+                // Extract text from ADF body
+                let commentText = 'No content';
+                if (comment.body?.content) {
+                  commentText = comment.body.content
+                    .map((block: any) => {
+                      if (block.type === 'paragraph' && block.content) {
+                        return block.content
+                          .map((item: any) => item.text || '')
+                          .join('');
+                      }
+                      return '';
+                    })
+                    .join('\n')
+                    .trim() || 'No content';
+                }
+                
+                formattedOutput += `\n---\n**${author}** - ${created}${updated}\n*Comment ID: ${comment.id}*\n${commentText}`;
+              });
+            } else if (include_comments) {
+              formattedOutput += '\n\n**Comments:** No comments found';
+            }
+          } catch (error) {
+            console.error('Error fetching comments:', error);
+            formattedOutput += '\n\n**Comments:** Error fetching comments';
+          }
+        }
 
         return {
           content: [
@@ -699,14 +902,20 @@ ${description}`;
                 payload.fields[fieldId] = value;
                 break;
               case 'sprint':
-                // Note: Jira API requires numeric sprint ID, not name
-                // This is a limitation - sprint names won't work properly
-                // TODO: Implement sprint name to ID lookup
+                // Jira API requires numeric sprint ID, not name
+                // Accept both numeric ID and attempt to parse if it's a string ID
                 if (!isNaN(Number(value))) {
                   payload.fields[fieldId] = Number(value);
                 } else {
-                  console.error(`Sprint requires numeric ID, got: ${value}`);
-                  // Skip this field as it won't work with name
+                  console.warn(`Sprint field requires numeric ID. Use search-sprints to find sprint IDs. Got: ${value}`);
+                  // Try to extract ID if it looks like "123" or numeric string
+                  const numericValue = parseInt(String(value));
+                  if (!isNaN(numericValue)) {
+                    payload.fields[fieldId] = numericValue;
+                  } else {
+                    // Skip this field as it won't work with name
+                    console.error(`Skipping sprint field - invalid format: ${value}`);
+                  }
                 }
                 break;
               case 'story_readiness':
@@ -790,14 +999,29 @@ ${description}`;
         };
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Successfully updated ticket ${ticket_id}`,
-          },
-        ],
-      };
+      // Get full ticket details with transitions after update
+      const detailsResult = await getFullTicketDetails(ticket_id, auth);
+      
+      if (detailsResult.success) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Successfully updated ticket!\n\n${detailsResult.ticketDetails}`,
+            },
+          ],
+        };
+      } else {
+        // Fallback to simple response if full details fail
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Successfully updated ticket ${ticket_id}`,
+            },
+          ],
+        };
+      }
     }
   );
 
@@ -877,6 +1101,8 @@ ${description}`;
         output += `**${issue.key}** - ${issue.fields.summary}\n`;
         output += `  Status: ${status} | Priority: ${priority} | Assignee: ${assigneeName}\n`;
         
+        // Note: Sprint field access is hardcoded here - would need project key to resolve dynamically
+        // For now, keeping the hardcoded field but adding a comment about the limitation
         if (issue.fields.customfield_10020 && issue.fields.customfield_10020.length > 0) {
           const sprint = issue.fields.customfield_10020[issue.fields.customfield_10020.length - 1];
           if (sprint.name) {
@@ -929,6 +1155,81 @@ ${description}`;
           {
             type: "text" as const,
             text: `Successfully added comment to ticket ${ticket_id}`,
+          },
+        ],
+      };
+    }
+  );
+
+  // Edit comment tool
+  server.tool(
+    "edit-comment",
+    "Edit an existing comment on a jira ticket",
+    {
+      ticket_id: z.string().min(1, "Ticket ID is required"),
+      comment_id: z.string().min(1, "Comment ID is required"),
+      new_comment: z.string().min(1, "New comment text is required"),
+    },
+    async ({ ticket_id, comment_id, new_comment }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const result = await updateJiraComment(ticket_id, comment_id, new_comment, auth);
+
+      if (!result.success) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error editing comment: ${result.errorMessage}`,
+            },
+          ],
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Successfully edited comment ${comment_id} on ticket ${ticket_id}`,
+          },
+        ],
+      };
+    }
+  );
+
+  // Delete comment tool
+  server.tool(
+    "delete-comment",
+    "Delete a comment from a jira ticket",
+    {
+      ticket_id: z.string().min(1, "Ticket ID is required"),
+      comment_id: z.string().min(1, "Comment ID is required"),
+    },
+    async ({ ticket_id, comment_id }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const result = await deleteJiraComment(ticket_id, comment_id, auth);
+
+      if (!result.success) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error deleting comment: ${result.errorMessage}`,
+            },
+          ],
+        };
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Successfully deleted comment ${comment_id} from ticket ${ticket_id}`,
           },
         ],
       };
@@ -988,6 +1289,547 @@ ${description}`;
             text: output,
           },
         ],
+      };
+    }
+  );
+
+  // Get project schema tool - returns all fields and available transitions
+  server.tool(
+    "get-project-schema",
+    "Get comprehensive schema for a Jira project including all fields and transitions",
+    {
+      project_key: z.string().optional(),
+      include_transitions: z.boolean().default(true),
+      sample_ticket: z.string().optional().describe("Ticket ID to use for transition discovery"),
+    },
+    async ({ project_key, include_transitions, sample_ticket }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const resolvedProjectKey = project_key || process.env.JIRA_PROJECT_KEY;
+      
+      // Get all fields
+      const fieldsResult = await getJiraFields(auth);
+      if (!fieldsResult.success) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error fetching fields: ${fieldsResult.errorMessage}`,
+          }],
+        };
+      }
+
+      // Filter fields relevant to the project (remove global ones that don't apply)
+      const relevantFields = fieldsResult.fields?.filter(field => {
+        // Include standard fields and project-specific custom fields
+        return !field.custom || 
+               !field.scope || 
+               field.scope.type === 'GLOBAL' ||
+               (field.scope.project?.id && field.scope.project.id === resolvedProjectKey);
+      }) || [];
+
+      let output = `**Project Schema for ${resolvedProjectKey}**\n\n`;
+      output += `**Fields (${relevantFields.length} available):**\n\n`;
+
+      // Get user preferences
+      const prefs = preferencesManager.getProjectPreferences(resolvedProjectKey || 'VIP');
+      const defaultFields = preferencesManager.getDefaultImportantFields();
+
+      relevantFields.forEach(field => {
+        const isImportant = preferencesManager.isFieldImportant(resolvedProjectKey || 'VIP', field.name.toLowerCase().replace(/\s+/g, '_'));
+        const isIgnored = preferencesManager.isFieldIgnored(resolvedProjectKey || 'VIP', field.id);
+        
+        let status = '';
+        if (isImportant) status = ' ⭐ (important)';
+        if (isIgnored) status = ' 🚫 (ignored)';
+        
+        output += `• **${field.name}** (${field.id})${status}\n`;
+        if (field.description) {
+          output += `  Description: ${field.description}\n`;
+        }
+        const fieldType = field.schema?.type || 'unknown';
+        output += `  Type: ${fieldType}`;
+        if (fieldType === 'user') {
+          output += ` (requires Account ID - use search-users first)`;
+        }
+        output += '\n';
+        
+        if (field.allowedValues && field.allowedValues.length > 0) {
+          output += `  Values: ${field.allowedValues.map(v => v.value || v.name).slice(0, 5).join(', ')}${field.allowedValues.length > 5 ? '...' : ''}\n`;
+        }
+        output += '\n';
+      });
+
+      // Get transitions if requested
+      if (include_transitions && sample_ticket) {
+        const transitionsResult = await getJiraTransitions(sample_ticket, auth);
+        if (transitionsResult.success && transitionsResult.transitions) {
+          output += `**Available Transitions for ${sample_ticket}:**\n\n`;
+          transitionsResult.transitions.forEach(transition => {
+            output += `• **${transition.name}** → ${transition.to.name} (ID: ${transition.id})\n`;
+          });
+          output += '\n';
+        }
+      }
+
+      output += `**Important Fields (defaults + learned):**\n`;
+      defaultFields.forEach(field => {
+        const mapping = preferencesManager.getFieldMapping(resolvedProjectKey || 'VIP', field);
+        if (mapping) {
+          output += `• ${field} → ${mapping}\n`;
+        } else {
+          output += `• ${field} (not yet configured)\n`;
+        }
+      });
+
+      output += `\n**Usage Instructions:**\n`;
+      output += `• Use these field names when creating or updating tickets\n`;
+      output += `• The LLM can ask users which fields they care about for this project\n`;
+      output += `• Fields marked with ⭐ are considered important for this project\n`;
+      output += `• Use transition-ticket to change status using the transition names shown\n`;
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: output,
+        }],
+      };
+    }
+  );
+
+  // Transition ticket status tool
+  server.tool(
+    "transition-ticket",
+    "Change the status of a Jira ticket using available transitions",
+    {
+      ticket_id: z.string().min(1, "Ticket ID is required"),
+      target_status: z.string().min(1, "Target status name is required"),
+      comment: z.string().optional(),
+    },
+    async ({ ticket_id, target_status, comment }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      // Get available transitions
+      const transitionsResult = await getJiraTransitions(ticket_id, auth);
+      if (!transitionsResult.success) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error fetching transitions: ${transitionsResult.errorMessage}`,
+          }],
+        };
+      }
+
+      // Find matching transition
+      const transitions = transitionsResult.transitions || [];
+      const matchingTransition = transitions.find(t => 
+        t.to.name.toLowerCase() === target_status.toLowerCase() ||
+        t.name.toLowerCase().includes(target_status.toLowerCase())
+      );
+
+      if (!matchingTransition) {
+        const availableStatuses = transitions.map(t => `"${t.to.name}" (via "${t.name}")`).join(', ');
+        return {
+          content: [{
+            type: "text" as const,
+            text: `No transition found to "${target_status}". Available transitions: ${availableStatuses}`,
+          }],
+        };
+      }
+
+      // Execute transition
+      const result = await transitionJiraTicket(ticket_id, matchingTransition.id, comment, auth);
+      
+      if (!result.success) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error transitioning ticket: ${result.errorMessage}`,
+          }],
+        };
+      }
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Successfully transitioned ${ticket_id} to "${matchingTransition.to.name}" using "${matchingTransition.name}"${comment ? ' with comment' : ''}`,
+        }],
+      };
+    }
+  );
+
+  // Search users tool
+  server.tool(
+    "search-users",
+    "Search for Jira users by name or email. IMPORTANT: When assigning tickets or setting user fields, you MUST first search for the user to get their accountId, then use that accountId in the update.",
+    {
+      query: z.string().min(1).describe("User's name or email address to search for"),
+    },
+    async ({ query }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const result = await searchJiraUsers(query, auth);
+
+      if (!result.success) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error searching users: ${result.errorMessage}`,
+          }],
+        };
+      }
+
+      const users = result.users || [];
+      
+      if (users.length === 0) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `No users found matching "${query}"`,
+          }],
+        };
+      }
+
+      let output = `**Found ${users.length} user(s):**\n\n`;
+      
+      users.forEach((user, index) => {
+        output += `**${index + 1}. ${user.displayName}**\n`;
+        output += `• Account ID: ${user.accountId}\n`;
+        output += `• Email: ${user.emailAddress || 'Not available'}\n`;
+        output += `• Active: ${user.active ? 'Yes' : 'No'}\n`;
+        output += `• Type: ${user.accountType}\n\n`;
+      });
+
+      if (users.length === 1) {
+        output += `**To assign this user to a ticket, use:**\n`;
+        output += `Account ID: ${users[0].accountId}\n`;
+      } else {
+        output += `**Note:** Multiple users found. Use the specific Account ID for the user you want.\n`;
+      }
+
+      output += `\n**Important:** When updating assignee or any user field, you MUST use the Account ID, not the display name or email.`;
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: output,
+        }],
+      };
+    }
+  );
+
+  // Get formatting help tool
+  server.tool(
+    "get-formatting-help",
+    "Get help with Jira formatting syntax for descriptions and comments",
+    {},
+    async () => {
+      const helpText = `**Jira Formatting Guide**
+
+## Basic Markdown
+- **Bold**: **text** 
+- *Italic*: *text*
+- Headers: ## Header 2, ### Header 3
+- Lists: - item or * item
+
+## Advanced Jira Elements
+
+### Info Panels
+Use panels to highlight important information:
+\`\`\`
+:::info
+This is an informational message
+:::
+
+:::warning
+This is a warning message
+:::
+
+:::error
+This is an error message
+:::
+
+:::success
+This is a success message
+:::
+
+:::note
+This is a note
+:::
+\`\`\`
+
+### Quote Blocks
+\`\`\`
+:::quote
+This is a quoted text block
+:::
+\`\`\`
+
+### Code Blocks
+Include code with syntax highlighting:
+\`\`\`
+\\\`\\\`\\\`javascript
+function hello() {
+    console.log("Hello World");
+}
+\\\`\\\`\\\`
+\`\`\`
+Supported languages: javascript, python, java, sql, json, xml, yaml, bash, and more.
+
+### Status Badges
+Show status indicators inline:
+\`\`\`
+@status[Done|green] - Task completed
+@status[In Progress|blue] - Currently working
+@status[To Do|neutral] - Not started
+@status[Blocked|red] - Issue blocked
+\`\`\`
+Colors: green, blue, neutral, red, purple, yellow
+
+### Expandable Sections
+Create collapsible content:
+\`\`\`
+:::expand Click to see more details
+Hidden content goes here.
+Can include multiple paragraphs.
+:::
+\`\`\`
+
+### Dividers
+Add horizontal lines to separate content:
+\`\`\`
+---
+\`\`\`
+
+### Emojis
+Use emoji shortcuts like:
+- :smile: :grin: :joy: - Happy faces
+- :thumbsup: :thumbsdown: - Feedback
+- :white_check_mark: :x: - Status indicators
+- :warning: :bulb: :fire: - Attention
+- :rocket: :star: :tada: - Celebration
+- :bug: :zap: :lock: - Development
+
+## Semantic Usage Guide - When to Use Each Element
+
+### Panel Types & Their Purpose:
+- **:::info (blue)**: Key information, system requirements, important context
+- **:::note (purple)**: Historical context, background information, related tickets, previous decisions
+- **:::warning (yellow/orange)**: Caution items, potential issues, things to watch out for
+- **:::error (red)**: Critical problems, blockers, failed processes, urgent attention needed  
+- **:::success (green)**: Completed work, successful outcomes, positive results
+- **:::quote**: External sources, customer feedback, requirements from stakeholders
+
+### Status Badge Colors:
+- **green**: Completed, working, success states
+- **blue**: In progress, active work, current status
+- **neutral/gray**: To do, planned, not started
+- **red**: Blocked, failed, error states
+- **purple**: Review needed, special attention
+- **yellow**: Warning, needs caution
+
+### Content Organization:
+- **Headers (##, ###)**: Structure your content, create clear sections
+- **Code Blocks**: API examples, configuration snippets, command line instructions
+- **Expandable Sections**: Detailed logs, step-by-step instructions, verbose explanations
+- **Dividers (---)**: Separate major sections, create visual breaks
+- **Bullet Lists**: Action items, requirements, feature lists
+- **Emojis**: Quick visual scanning - ✅ done, ❌ failed, ⚠️ warning, 🚀 deployment, 🐛 bug
+
+### Example Ticket Structure:
+\`\`\`
+:::note  
+Historical Context: This relates to ticket ABC-123 where we decided to migrate from X to Y.
+:::
+
+## Problem Statement
+Description of the issue...
+
+:::warning
+Breaking Change: This will affect existing integrations.
+:::
+
+## Acceptance Criteria
+- [ ] Requirement 1
+- [ ] Requirement 2
+
+@status[To Do|neutral] Ready for development
+
+\\\`\\\`\\\`bash
+# Example command
+npm run build
+\\\`\\\`\\\`
+
+:::expand Technical Details
+Detailed implementation notes go here...
+:::
+\`\`\`
+
+This structure helps create professional, scannable tickets that communicate clearly to both technical and non-technical stakeholders.`;
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: helpText,
+        }],
+      };
+    }
+  );
+
+  // Search sprints tool - for LLMs to discover sprint IDs
+  server.tool(
+    "search-sprints",
+    "Search for active and recent sprints to get sprint IDs for ticket assignment. Use this before assigning tickets to sprints.",
+    {
+      project_key: z.string().optional(),
+      include_future: z.boolean().default(false).describe("Include future sprints in results"),
+      max_results: z.number().min(1).max(20).default(10),
+    },
+    async ({ project_key, include_future, max_results }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const resolvedProjectKey = project_key || process.env.JIRA_PROJECT_KEY;
+      
+      // Build JQL to find sprints
+      let jql = "";
+      if (resolvedProjectKey) {
+        jql = `project = "${resolvedProjectKey}"`;
+      }
+      
+      // Add sprint state filters
+      if (include_future) {
+        jql += jql ? " AND " : "";
+        jql += "sprint in (openSprints(), futureSprints())";
+      } else {
+        jql += jql ? " AND " : "";
+        jql += "sprint in (openSprints())";
+      }
+      
+      jql += " ORDER BY updated DESC";
+
+      try {
+        const searchResult = await searchJiraTickets(jql, max_results, auth);
+        
+        if (!searchResult.success) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Error searching for sprint tickets: ${searchResult.errorMessage}`,
+            }],
+          };
+        }
+
+        // Extract unique sprints from tickets
+        const sprintSet = new Set();
+        const sprintDetails: any[] = [];
+        
+        if (searchResult.data.issues) {
+          searchResult.data.issues.forEach((issue: any) => {
+            // Check for sprint field (typically customfield_10020)
+            if (issue.fields.customfield_10020 && Array.isArray(issue.fields.customfield_10020)) {
+              issue.fields.customfield_10020.forEach((sprint: any) => {
+                if (sprint.id && !sprintSet.has(sprint.id)) {
+                  sprintSet.add(sprint.id);
+                  sprintDetails.push({
+                    id: sprint.id,
+                    name: sprint.name || 'Unnamed Sprint',
+                    state: sprint.state || 'unknown',
+                    startDate: sprint.startDate ? new Date(sprint.startDate).toLocaleDateString() : 'Not set',
+                    endDate: sprint.endDate ? new Date(sprint.endDate).toLocaleDateString() : 'Not set',
+                  });
+                }
+              });
+            }
+          });
+        }
+
+        if (sprintDetails.length === 0) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `No active sprints found in project ${resolvedProjectKey}. This could mean:\n• Project has no active sprints\n• Sprint field mapping needs configuration\n• Project key is incorrect`,
+            }],
+          };
+        }
+
+        // Sort sprints by state (active first, then future)
+        sprintDetails.sort((a, b) => {
+          const stateOrder: { [key: string]: number } = { 'ACTIVE': 0, 'FUTURE': 1, 'CLOSED': 2, 'unknown': 3 };
+          return (stateOrder[a.state] || 3) - (stateOrder[b.state] || 3);
+        });
+
+        let output = `**Available Sprints in ${resolvedProjectKey}**\n\n`;
+        
+        sprintDetails.forEach(sprint => {
+          const stateEmoji = sprint.state === 'ACTIVE' ? '🟢' : sprint.state === 'FUTURE' ? '🔵' : '⚫';
+          output += `${stateEmoji} **${sprint.name}** (ID: ${sprint.id})\n`;
+          output += `  State: ${sprint.state}\n`;
+          output += `  Dates: ${sprint.startDate} → ${sprint.endDate}\n\n`;
+        });
+
+        output += `**To assign a ticket to a sprint:**\n`;
+        output += `Use the sprint ID (not name) in update-ticket or create-ticket:\n`;
+        output += `Example: \`sprint: "${sprintDetails[0]?.id || 'SPRINT_ID'}"\`\n\n`;
+        output += `**Note:** Sprint assignment requires the numeric sprint ID, not the sprint name.`;
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: output,
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error searching sprints: ${error instanceof Error ? error.message : String(error)}`,
+          }],
+        };
+      }
+    }
+  );
+
+  // Debug tool to inspect raw ticket data
+  server.tool(
+    "debug-raw-ticket",
+    "Get raw ticket data to inspect custom fields (debug tool)",
+    {
+      ticket_id: z.string().min(1).describe("Ticket ID to get raw data for"),
+    },
+    async ({ ticket_id }) => {
+      const auth = Buffer.from(
+        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
+      ).toString("base64");
+
+      const result = await getRawTicketData(ticket_id, auth);
+      
+      if (!result.success) {
+        return {
+          content: [{ type: "text", text: `Error getting raw ticket data: ${result.errorMessage}` }]
+        };
+      }
+
+      // Find all custom fields and their values
+      const customFields: any[] = [];
+      for (const [key, value] of Object.entries(result.rawData.fields)) {
+        if (key.startsWith('customfield_') && value !== null && value !== undefined) {
+          customFields.push({ field: key, value: value });
+        }
+      }
+
+      return {
+        content: [{ 
+          type: "text", 
+          text: `**Raw Custom Fields for ${ticket_id}:**\n\n` +
+                customFields.map(cf => `• **${cf.field}**: ${JSON.stringify(cf.value, null, 2)}`).join('\n\n')
+        }]
       };
     }
   );

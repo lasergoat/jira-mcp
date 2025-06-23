@@ -1,6 +1,10 @@
 import fetch from "node-fetch";
+import { formatDescription } from "./formatting.js";
 import FormData from "form-data";
-import { JiraCreateResponse, JiraSearchResponse } from "./types.js";
+import { JiraCreateResponse, JiraSearchResponse, JiraField, JiraTransition } from "./types.js";
+
+// Re-export all extended API functions
+export * from "./api-extended.js";
 
 // Helper function to update a JIRA ticket
 export async function updateJiraTicket(
@@ -260,21 +264,7 @@ export async function addJiraComment(
         Authorization: `Basic ${auth}`,
       },
       body: JSON.stringify({
-        body: {
-          type: "doc",
-          version: 1,
-          content: [
-            {
-              type: "paragraph",
-              content: [
-                {
-                  type: "text",
-                  text: comment,
-                },
-              ],
-            },
-          ],
-        },
+        body: formatDescription(comment),
       }),
     });
 
@@ -397,3 +387,4 @@ export async function uploadJiraAttachment(
     };
   }
 }
+
