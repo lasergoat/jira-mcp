@@ -112,7 +112,7 @@ export function registerConfigTools(server: McpServer) {
           }
         }
 
-        // Save configuration
+        // Save configuration (will auto-set as default if first project)
         await configManager.saveProjectConfig(project_key, projectConfig);
 
         return {
@@ -140,6 +140,7 @@ export function registerConfigTools(server: McpServer) {
     async () => {
       try {
         const projects = await configManager.listConfiguredProjects();
+        const defaultProject = await configManager.getDefaultProject();
         
         if (projects.length === 0) {
           return {
@@ -150,14 +151,16 @@ export function registerConfigTools(server: McpServer) {
           };
         }
 
-        const projectList = projects.map(p => 
-          `• ${p.projectKey} (${p.fieldCount} fields) - Updated: ${new Date(p.lastUpdated).toLocaleString()}\n  Fields: ${p.fields.join(', ')}`
-        ).join('\n\n');
+        const projectList = projects.map(p => {
+          const isDefault = p.projectKey === defaultProject;
+          const defaultLabel = isDefault ? " (DEFAULT)" : "";
+          return `• ${p.projectKey}${defaultLabel} (${p.fieldCount} fields) - Updated: ${new Date(p.lastUpdated).toLocaleString()}\n  Fields: ${p.fields.join(', ')}`;
+        }).join('\n\n');
 
         return {
           content: [{
             type: "text" as const,
-            text: `Configured projects:\n\n${projectList}`
+            text: `Configured projects:\n\n${projectList}\n\nDefault project: ${defaultProject || 'None set'}`
           }]
         };
       } catch (error) {
@@ -247,6 +250,69 @@ export function registerConfigTools(server: McpServer) {
           content: [{
             type: "text" as const,
             text: `Error copying project config: ${error instanceof Error ? error.message : String(error)}`
+          }]
+        };
+      }
+    }
+  );
+
+  // Set default project tool
+  server.tool(
+    "set-default-project",
+    "Set a project as the default for operations when no project is specified",
+    {
+      project_key: z.string().min(1, "Project key is required")
+    },
+    async ({ project_key }) => {
+      try {
+        await configManager.setDefaultProject(project_key);
+        
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Successfully set ${project_key} as the default project. All future operations will use this project when no project is explicitly specified.`
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error setting default project: ${error instanceof Error ? error.message : String(error)}`
+          }]
+        };
+      }
+    }
+  );
+
+  // Get default project tool
+  server.tool(
+    "get-default-project",
+    "Get the current default project for operations",
+    {},
+    async () => {
+      try {
+        const defaultProject = await configManager.getDefaultProject();
+        
+        if (!defaultProject) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: "No default project is currently set. Configure a project first using 'configure-project-fields' to set a default."
+            }]
+          };
+        }
+
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Current default project: ${defaultProject}\n\nThis project will be used when no project is explicitly specified in operations like create-ticket, get-ticket, etc.`
+          }]
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error getting default project: ${error instanceof Error ? error.message : String(error)}`
           }]
         };
       }

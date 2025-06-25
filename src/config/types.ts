@@ -8,6 +8,7 @@ export interface FieldMapping {
 export interface ProjectConfig {
   projectKey: string;
   lastUpdated: string;
+  isDefault?: boolean;
   fields: {
     [key: string]: FieldMapping;
   };

@@ -52,18 +52,37 @@ export class ConfigManager {
     return config;
   }
 
-  async saveProjectConfig(projectKey: string, config: ProjectConfig): Promise<void> {
+  async saveProjectConfig(projectKey: string, config: ProjectConfig, setAsDefault?: boolean): Promise<void> {
     await this.ensureConfigDir();
     
-    const filePath = path.join(this.configPath, `${projectKey}.json`);
-    config.lastUpdated = new Date().toISOString();
+    // If this is the first project being configured, make it default
+    const existingConfig = await this.loadConfig();
+    const isFirstProject = Object.keys(existingConfig.projects).length === 0;
     
-    await fs.writeFile(filePath, JSON.stringify(config, null, 2));
+    // If setting as default or this is the first project, clear other defaults
+    if (setAsDefault || isFirstProject) {
+      // Clear existing default from other projects
+      for (const [key, projectConfig] of Object.entries(existingConfig.projects)) {
+        if (projectConfig.isDefault && key !== projectKey) {
+          projectConfig.isDefault = false;
+          await this.saveProjectConfigFile(key, projectConfig);
+        }
+      }
+      config.isDefault = true;
+    }
+    
+    config.lastUpdated = new Date().toISOString();
+    await this.saveProjectConfigFile(projectKey, config);
     
     // Update cache
     if (this.cache) {
       this.cache.projects[projectKey] = config;
     }
+  }
+
+  private async saveProjectConfigFile(projectKey: string, config: ProjectConfig): Promise<void> {
+    const filePath = path.join(this.configPath, `${projectKey}.json`);
+    await fs.writeFile(filePath, JSON.stringify(config, null, 2));
   }
 
   async getProjectConfig(projectKey: string): Promise<ProjectConfig | null> {
@@ -140,6 +159,67 @@ export class ConfigManager {
       fieldCount: Object.keys(project.fields).length,
       fields: Object.keys(project.fields)
     }));
+  }
+
+  async getDefaultProject(): Promise<string | null> {
+    const config = await this.loadConfig();
+    
+    for (const [projectKey, projectConfig] of Object.entries(config.projects)) {
+      if (projectConfig.isDefault) {
+        return projectKey;
+      }
+    }
+    
+    // If no default is set but projects exist, return the first one
+    const projectKeys = Object.keys(config.projects);
+    if (projectKeys.length > 0) {
+      return projectKeys[0];
+    }
+    
+    return null;
+  }
+
+  async setDefaultProject(projectKey: string): Promise<void> {
+    const config = await this.loadConfig();
+    
+    // Check if project exists
+    if (!config.projects[projectKey]) {
+      throw new Error(`Project ${projectKey} not found`);
+    }
+    
+    // Clear existing defaults
+    for (const [key, projectConfig] of Object.entries(config.projects)) {
+      if (projectConfig.isDefault) {
+        projectConfig.isDefault = false;
+        await this.saveProjectConfigFile(key, projectConfig);
+      }
+    }
+    
+    // Set new default
+    const projectConfig = config.projects[projectKey];
+    projectConfig.isDefault = true;
+    await this.saveProjectConfigFile(projectKey, projectConfig);
+    
+    // Update cache
+    if (this.cache) {
+      this.cache.projects[projectKey] = projectConfig;
+    }
+  }
+
+  async getProjectKeyWithFallback(requestedProject?: string): Promise<string> {
+    // If project is explicitly provided, use it
+    if (requestedProject) {
+      return requestedProject;
+    }
+    
+    // Try to get default project
+    const defaultProject = await this.getDefaultProject();
+    if (defaultProject) {
+      return defaultProject;
+    }
+    
+    // Fall back to environment variable
+    return process.env.JIRA_PROJECT_KEY || 'UNKNOWN';
   }
 
   // Clear cache to force reload

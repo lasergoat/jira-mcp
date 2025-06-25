@@ -84,3 +84,24 @@ export function extractProjectKey(
   
   return envKey || process.env.JIRA_PROJECT_KEY;
 }
+
+// Async helper to extract project key with default project support
+export async function extractProjectKeyWithDefault(
+  explicitKey?: string,
+  issueKey?: string
+): Promise<string> {
+  if (explicitKey) {
+    return explicitKey;
+  }
+  
+  if (issueKey) {
+    // Extract project key from issue key (e.g., "VIP-123" -> "VIP")
+    const match = issueKey.match(/^([A-Z]+)-/);
+    if (match) {
+      return match[1];
+    }
+  }
+  
+  // Use the config manager to get the project with default fallback
+  return await configManager.getProjectKeyWithFallback();
+}

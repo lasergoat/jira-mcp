@@ -70,6 +70,42 @@ function markdownToADF(markdown: string): any {
       currentList = null;
     }
     
+    // Confluence-style panels {panel:...}
+    if (trimmedLine.startsWith('{panel:')) {
+      const panelContent: any[] = [];
+      // Extract title from panel parameters
+      const titleMatch = trimmedLine.match(/title=([^|]*)/);
+      const title = titleMatch ? titleMatch[1].replace(/⚠️|🚨|⚠|🔥|💡|ℹ️|✅|❌|🔧|📝/g, '').trim() : '';
+      
+      i++; // Move to next line
+      
+      // Collect panel content until closing {panel}
+      while (i < lines.length && !lines[i].trim().startsWith('{panel}')) {
+        if (lines[i].trim()) {
+          panelContent.push({
+            type: "paragraph",
+            content: parseInlineFormatting(lines[i])
+          });
+        }
+        i++;
+      }
+      
+      // Default to warning panel for Confluence-style panels
+      content.push({
+        type: "panel",
+        attrs: {
+          panelType: "warning"
+        },
+        content: panelContent.length > 0 ? panelContent : [{
+          type: "paragraph",
+          content: [{ type: "text", text: title || "Panel content" }]
+        }]
+      });
+      
+      i++; // Skip closing {panel}
+      continue;
+    }
+
     // Panel blocks (:::info, :::warning, etc.)
     if (trimmedLine.startsWith(':::')) {
       const panelMatch = trimmedLine.match(/^:::(\w+)(?:\s+(.*))?$/);
