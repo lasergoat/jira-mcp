@@ -1,10 +1,10 @@
-# JIRA MCP Integration
+# Advanced JIRA MCP Integration
 
-A [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol) server for integrating JIRA with Claude. This tool allows Claude to create JIRA tickets directly within your conversations.
+A comprehensive [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol) server for seamless JIRA integration with Claude. This advanced tool provides extensive JIRA project management capabilities including dynamic field configuration, intelligent ticket management, sprint planning, user management, and comprehensive search features.
 
 ## Overview
 
-The JIRA MCP project is a Node.js/TypeScript application that provides a Model Context Protocol (MCP) server for integrating with JIRA and Zephyr. It allows AI assistants to interact with JIRA for project management and Zephyr for test management through a standardized protocol.
+This enhanced JIRA MCP is a sophisticated Node.js/TypeScript application that provides a feature-rich Model Context Protocol (MCP) server for deep JIRA and Zephyr integration. It enables AI assistants to perform comprehensive JIRA operations including dynamic field discovery, project configuration management, advanced ticket operations, sprint management, user administration, and test management through an intelligent, standardized protocol.
 
 <img width="772" alt="grafik" src="https://github.com/user-attachments/assets/a6f9afd8-7f75-4316-9421-ee7126002d2b" />
 <img width="1188" alt="grafik" src="https://github.com/user-attachments/assets/b8f089ac-4443-4a64-91c0-87b97175d9dd" />
@@ -49,24 +49,64 @@ The JIRA MCP project is a Node.js/TypeScript application that provides a Model C
 
 ## Features
 
-- Create JIRA tickets with summary, description, acceptance criteria, and issue type
-- Assign story points to Story tickets
-- Automatically create linked Test tickets for Stories with points
-- Search for JIRA tickets by issue type and additional criteria
-- Update existing JIRA tickets with new field values
-- Link JIRA tickets together with specified relationship types
-- Retrieve and add test steps for Zephyr test tickets
-- Seamless integration with Claude desktop application
-- Simple configuration using Claude's desktop configuration file
+### Core Ticket Management
+- **Advanced Ticket Creation**: Create tickets with comprehensive field support including custom fields, components, labels, priority, assignee, and automatic linking
+- **Dynamic Field Configuration**: Intelligent field discovery and mapping system that automatically identifies custom fields across different JIRA instances
+- **Ticket Cloning**: Create new tickets based on existing ones, automatically copying relevant fields and maintaining relationships
+- **Link Management**: Create and manage relationships between tickets with various link types
+- **Bulk Operations**: Update multiple aspects of tickets efficiently
+
+### Project & Configuration Management
+- **Multi-Project Support**: Configure and manage multiple JIRA projects with project-specific field mappings
+- **Default Project System**: Set default projects for streamlined operations
+- **Field Discovery**: Automatically discover and configure custom fields for any JIRA instance
+- **Configuration Persistence**: Save and reuse project configurations across sessions
+- **Schema Inspection**: Comprehensive project schema analysis including fields and transitions
+
+### Advanced Search & Discovery
+- **Epic Management**: Search, discover, and manage epics with intelligent suggestions
+- **Sprint Management**: Complete sprint lifecycle management including search, assignment, and current sprint detection
+- **User Management**: Search and resolve users by name, email, or account ID for accurate assignments
+- **Ticket Search**: Advanced JQL-based searching with flexible criteria and filtering
+- **Component Management**: Discover and validate project components
+
+### Workflow & Status Management
+- **Status Transitions**: Change ticket status using available workflow transitions
+- **Sprint Planning**: Assign tickets to sprints with intelligent sprint discovery
+- **Priority Management**: Set and update ticket priorities with validation
+- **Story Point Management**: Handle story points with Fibonacci sequence validation
+
+### Communication & Documentation
+- **Comment System**: Add, edit, and delete comments on tickets
+- **Rich Formatting**: JIRA-compatible formatting with syntax assistance
+- **Attachment Management**: Upload and manage file attachments
+- **Acceptance Criteria**: Structure and format acceptance criteria properly
+
+### Test Management (Zephyr Integration)
+- **Test Step Management**: Create and retrieve detailed test steps
+- **Automated Test Ticket Creation**: Automatically create linked test tickets for stories
+- **Test Case Linking**: Maintain relationships between stories and test cases
+
+### Developer & Debug Tools
+- **Raw Data Access**: Debug tools for inspecting raw ticket data and custom fields
+- **Field Mapping**: Tools for discovering and mapping custom field IDs
+- **Configuration Validation**: Validate and troubleshoot project configurations
+- **Error Handling**: Comprehensive error reporting with actionable suggestions
+
+### Integration Features
+- **Seamless Claude Integration**: Optimized for Claude desktop and VSCode extension
+- **Environment-Based Configuration**: Flexible configuration using environment variables
+- **Authentication Management**: Secure API token-based authentication
+- **Multi-Instance Support**: Connect to multiple JIRA instances with different configurations
 
 ## Installation
 
 ### For Claude Desktop
 
-1. Clone the repository:
+1. Clone this repository:
 
-   ```
-   git clone https://github.com/MankowskiNick/jira-mcp.git
+   ```bash
+   git clone <repository-url>
    cd jira-mcp
    ```
 
@@ -83,45 +123,46 @@ The JIRA MCP project is a Node.js/TypeScript application that provides a Model C
     npm run build-win -- on windows systems
    ```
 
-### For GitHub Copilot in VSCode
+### For VSCode MCP Extension
 
 1. First, ensure you've built the project locally:
 
    ```bash
-   cd /Users/danielwalker/Projects/jira-mcp
+   cd /path/to/your/jira-mcp
    npm install
    npm run build
    ```
 
-2. Add the MCP server to your VSCode configuration. In your VSCode settings, add:
+2. Create or update the MCP configuration file in your project root:
+
+   **Create `.vscode/mcp.json` in your project directory:**
 
    ```json
-   "mcp": {
-     "servers": {
-       "Jira-Mcp-Local": {
-         "type": "stdio",
+   {
+     "mcpServers": {
+       "jira-mcp": {
          "command": "node",
-         "args": [
-           "/Users/danielwalker/Projects/jira-mcp/build/index.js"
-         ],
+         "args": ["/absolute/path/to/jira-mcp/build/index.js"],
          "env": {
            "JIRA_HOST": "your-site.atlassian.net",
            "JIRA_USERNAME": "your-email@example.com",
            "JIRA_API_TOKEN": "your_api_token",
-           "JIRA_PROJECT_KEY": "VIP"
+           "JIRA_PROJECT_KEY": "your_project_key"
          }
        }
      }
    }
    ```
 
-   Replace the environment values with your actual JIRA credentials and adjust the path if different.
+   **Important Configuration Notes:**
+   - Replace `/absolute/path/to/jira-mcp/build/index.js` with the actual absolute path to your built project
+   - Replace the environment values with your actual JIRA credentials
+   - The `.vscode/mcp.json` file should be in your project's root directory (not in your home directory)
+   - Ensure the path to `index.js` is absolute, not relative
 
-3. In GitHub Copilot's "Enter Command" interface, use:
+3. **Restart VSCode** after creating the configuration file
 
-   ```
-   node /Users/danielwalker/Projects/jira-mcp/build/index.js
-   ```
+4. The MCP tools will be available in compatible VSCode extensions that support MCP
 
 ## Configuration
 
@@ -134,8 +175,8 @@ Add the JIRA MCP server configuration to your Claude configuration file:
   - Windows: `%APPDATA%\Roaming\Claude\claude_desktop_config.json`
   - Linux: `~/.config/Claude/claude_desktop_config.json`
 
-- **VSCode Extension**:
-  - `~/.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+- **VSCode MCP Extension**:
+  - Create `.vscode/mcp.json` in your project root directory
 
 ### Configuration Template
 
@@ -268,6 +309,50 @@ GET https://your-site.atlassian.net/rest/api/3/field
 ```
 
 ## Available Tools
+
+This enhanced MCP server provides **27 comprehensive tools** organized into the following categories:
+
+### Core Ticket Management Tools
+- **create-ticket**: Create comprehensive JIRA tickets with all field support
+- **create-ticket-like**: Clone tickets from existing ones with automatic field copying
+- **get-ticket**: Retrieve detailed ticket information
+- **get-ticket-raw**: Access raw ticket data for debugging
+- **debug-raw-ticket**: Inspect custom fields and raw ticket structure
+- **update-ticket**: Update existing tickets with new field values
+- **link-tickets**: Create relationships between tickets
+- **transition-ticket**: Change ticket status using workflow transitions
+
+### Search & Discovery Tools
+- **search-tickets**: Advanced JQL-based ticket searching with flexible criteria
+- **search-epics**: Discover and search project epics
+- **search-users**: Find users by name/email for accurate assignments
+- **search-sprints**: Discover active and recent sprints
+- **search-sprint-tickets**: Find tickets within specific sprints
+- **get-current-sprint**: Get the active sprint for a project
+
+### Project Configuration Tools
+- **configure-project-fields**: Intelligent field discovery and configuration
+- **list-configured-projects**: View all configured projects
+- **get-project-config**: Inspect project-specific field configurations
+- **copy-project-config**: Duplicate configurations between projects
+- **set-default-project**: Configure default project for operations
+- **get-default-project**: View current default project
+- **get-project-schema**: Comprehensive project schema analysis
+
+### Communication Tools
+- **add-comment**: Add comments to tickets
+- **edit-comment**: Modify existing comments
+- **delete-comment**: Remove comments from tickets
+- **upload-attachment**: Add file attachments to tickets
+- **get-formatting-help**: Get JIRA formatting syntax assistance
+
+### Test Management Tools (Zephyr Integration)
+- **get-test-steps**: Retrieve test steps from test tickets
+- **add-test-steps**: Add detailed test steps to test tickets
+
+---
+
+## Detailed Tool Documentation
 
 ### create-ticket
 
