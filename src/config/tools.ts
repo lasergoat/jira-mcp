@@ -3,11 +3,109 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ConfigManager } from "./manager.js";
 import { FieldDiscovery } from "./discovery.js";
 import { ProjectConfig, FieldMapping } from "./types.js";
+import { credentialsManager } from "./credentials.js";
+import { getAuth, getJiraHost, testConnection, getCredentialsSource, CredentialsNotConfiguredError } from "../auth/index.js";
 
 // Create a singleton config manager
 const configManager = new ConfigManager(process.env.JIRA_DYNAMIC_CONFIG_PATH);
 
 export function registerConfigTools(server: McpServer) {
+  // Initialize Jira connection tool
+  server.tool(
+    "initialize-jira-connection",
+    "Initialize Jira connection with host, username, and API token. This should be the first tool called when setting up the MCP.",
+    {
+      host: z.string().min(1, "Jira host is required (e.g., 'company.atlassian.net')"),
+      username: z.string().min(1, "Username/email is required"),
+      api_token: z.string().min(1, "API token is required"),
+    },
+    async ({ host, username, api_token }) => {
+      try {
+        // Save credentials
+        await credentialsManager.saveCredentials({
+          host,
+          username,
+          apiToken: api_token
+        });
+
+        // Test the connection
+        const testResult = await testConnection();
+
+        if (testResult.success) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `✓ Jira connection initialized successfully!\n\n${testResult.message}\n\nYou can now use all Jira MCP tools. Consider running 'configure-project-fields' next to set up your project.`
+            }]
+          };
+        } else {
+          // Clear invalid credentials
+          await credentialsManager.clearCredentials();
+          return {
+            content: [{
+              type: "text" as const,
+              text: `✗ Failed to initialize Jira connection:\n\n${testResult.message}\n\nPlease check your credentials and try again.`
+            }]
+          };
+        }
+      } catch (error) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error initializing connection: ${error instanceof Error ? error.message : String(error)}`
+          }]
+        };
+      }
+    }
+  );
+
+  // Check Jira connection tool
+  server.tool(
+    "check-jira-connection",
+    "Check if Jira connection is configured and working",
+    {},
+    async () => {
+      try {
+        const source = await getCredentialsSource();
+        
+        if (source === 'none') {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `✗ No Jira credentials configured.\n\nPlease run 'initialize-jira-connection' with your Jira host, username, and API token to get started.`
+            }]
+          };
+        }
+
+        const testResult = await testConnection();
+        const sourceText = source === 'file' ? 'credentials file' : 'environment variables';
+
+        if (testResult.success) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `✓ Jira connection is working!\n\nSource: ${sourceText}\n${testResult.message}`
+            }]
+          };
+        } else {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `✗ Jira connection failed.\n\nSource: ${sourceText}\n${testResult.message}`
+            }]
+          };
+        }
+      } catch (error) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error checking connection: ${error instanceof Error ? error.message : String(error)}`
+          }]
+        };
+      }
+    }
+  );
+
   // Configure project fields tool
   server.tool(
     "configure-project-fields",
@@ -20,16 +118,14 @@ export function registerConfigTools(server: McpServer) {
     },
     async ({ project_key, fields_to_discover, sample_issue_key, user_hints }) => {
       try {
-        const jiraHost = process.env.JIRA_HOST;
-        const auth = Buffer.from(
-          `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-        ).toString("base64");
+        const jiraHost = await getJiraHost();
+        const auth = await getAuth();
 
         if (!jiraHost) {
           return {
             content: [{
               type: "text" as const,
-              text: "Error: JIRA_HOST not configured"
+              text: "Error: Jira credentials not configured. Please run 'initialize-jira-connection' first."
             }]
           };
         }
@@ -63,6 +159,7 @@ export function registerConfigTools(server: McpServer) {
 
         // Apply discovered mappings
         const results: string[] = [];
+        const requiredFields: string[] = [];
         
         if (fields_to_discover && fields_to_discover.length > 0) {
           // Configure specific fields
@@ -70,7 +167,12 @@ export function registerConfigTools(server: McpServer) {
             const mapping = discoveredMappings.get(fieldName);
             if (mapping) {
               projectConfig.fields[fieldName] = mapping;
-              results.push(`✓ ${fieldName}: ${mapping.name} (${mapping.id}) - ${mapping.confidence}% confidence`);
+              const requiredTag = mapping.required ? ' [REQUIRED]' : '';
+              const valuesCount = mapping.allowedValues ? ` (${mapping.allowedValues.length} values)` : '';
+              results.push(`✓ ${fieldName}: ${mapping.name} (${mapping.id})${requiredTag}${valuesCount} - ${mapping.confidence}% confidence`);
+              if (mapping.required) {
+                requiredFields.push(fieldName);
+              }
             } else if (user_hints && user_hints[fieldName]) {
               // Use user hint
               const fieldId = user_hints[fieldName];
@@ -91,7 +193,12 @@ export function registerConfigTools(server: McpServer) {
           // Configure all discovered fields
           for (const [fieldName, mapping] of discoveredMappings) {
             projectConfig.fields[fieldName] = mapping;
-            results.push(`✓ ${fieldName}: ${mapping.name} (${mapping.id}) - ${mapping.confidence}% confidence`);
+            const requiredTag = mapping.required ? ' [REQUIRED]' : '';
+            const valuesCount = mapping.allowedValues ? ` (${mapping.allowedValues.length} values)` : '';
+            results.push(`✓ ${fieldName}: ${mapping.name} (${mapping.id})${requiredTag}${valuesCount} - ${mapping.confidence}% confidence`);
+            if (mapping.required) {
+              requiredFields.push(fieldName);
+            }
           }
         }
 
@@ -115,13 +222,41 @@ export function registerConfigTools(server: McpServer) {
         // Save configuration (will auto-set as default if first project)
         await configManager.saveProjectConfig(project_key, projectConfig);
 
+        let outputText = `Project ${project_key} configuration updated:\n\n${results.join('\n')}`;
+        
+        if (requiredFields.length > 0) {
+          outputText += `\n\n**Required fields for creating tickets:**\n${requiredFields.map(f => `• ${f}`).join('\n')}`;
+          
+          // Show origination values if it's required
+          if (requiredFields.includes('origination')) {
+            const originationField = projectConfig.fields['origination'];
+            if (originationField && originationField.allowedValues && originationField.allowedValues.length > 0) {
+              outputText += `\n\n**Origination allowed values:**\n`;
+              originationField.allowedValues.slice(0, 10).forEach(val => {
+                outputText += `• ${val.value} (id: ${val.id})\n`;
+              });
+              if (originationField.allowedValues.length > 10) {
+                outputText += `... and ${originationField.allowedValues.length - 10} more values`;
+              }
+            }
+          }
+        }
+
         return {
           content: [{
             type: "text" as const,
-            text: `Project ${project_key} configuration updated:\n\n${results.join('\n')}`
+            text: outputText
           }]
         };
       } catch (error) {
+        if (error instanceof CredentialsNotConfiguredError) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: error.message
+            }]
+          };
+        }
         return {
           content: [{
             type: "text" as const,

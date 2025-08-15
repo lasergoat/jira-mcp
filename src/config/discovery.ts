@@ -1,4 +1,5 @@
 import { DiscoveredField, FieldMapping } from './types.js';
+import fetch from 'node-fetch';
 
 interface FieldMatchResult {
   field: DiscoveredField;
@@ -70,7 +71,7 @@ export class FieldDiscovery {
       throw new Error(`Failed to fetch fields: ${response.statusText}`);
     }
 
-    return await response.json();
+    return await response.json() as DiscoveredField[];
   }
 
   static findFieldMatches(
@@ -159,6 +160,9 @@ export class FieldDiscovery {
     // Get all available fields
     const allFields = await this.discoverFields(jiraHost, auth);
     
+    // Get create metadata to find required fields and allowed values
+    const createMetadata = await this.fetchCreateMetadata(jiraHost, auth, projectKey);
+    
     // If sample issue provided, analyze it to see which fields are actually used
     let sampleFieldsInUse: Set<string> = new Set();
     if (sampleIssueKey) {
@@ -187,11 +191,16 @@ export class FieldDiscovery {
 
         // Take the best match if confidence is high enough
         if (matches.length > 0 && matches[0].confidence >= 70) {
+          const fieldId = matches[0].field.id;
+          const metadataField = createMetadata.get(fieldId);
+          
           fieldMappings.set(fieldName, {
-            id: matches[0].field.id,
+            id: fieldId,
             name: matches[0].field.name,
             type: matches[0].field.schema?.type || 'string',
-            confidence: matches[0].confidence
+            confidence: matches[0].confidence,
+            required: metadataField?.required,
+            allowedValues: metadataField?.allowedValues
           });
         }
       }
@@ -206,17 +215,65 @@ export class FieldDiscovery {
           .replace(/^_|_$/g, '');
         
         const confidence = sampleFieldsInUse.has(field.id) ? 90 : 50;
+        const metadataField = createMetadata.get(field.id);
         
         fieldMappings.set(cleanFieldName, {
           id: field.id,
           name: field.name,
           type: field.schema?.type || 'string',
-          confidence: confidence
+          confidence: confidence,
+          required: metadataField?.required,
+          allowedValues: metadataField?.allowedValues
         });
       }
     }
 
     return fieldMappings;
+  }
+
+  private static async fetchCreateMetadata(
+    jiraHost: string,
+    auth: string,
+    projectKey: string
+  ): Promise<Map<string, { required: boolean; allowedValues?: any[] }>> {
+    const url = `https://${jiraHost}/rest/api/3/issue/createmeta?projectKeys=${projectKey}&expand=projects.issuetypes.fields`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`Failed to fetch create metadata: ${response.statusText}`);
+      return new Map();
+    }
+
+    const data = await response.json() as any;
+    const fieldMetadata = new Map<string, { required: boolean; allowedValues?: any[] }>();
+
+    // Extract field metadata from all issue types
+    if (data.projects && data.projects[0] && data.projects[0].issuetypes) {
+      for (const issueType of data.projects[0].issuetypes) {
+        if (issueType.fields) {
+          for (const [fieldId, fieldData] of Object.entries(issueType.fields as any)) {
+            // If field already exists, merge data (take most restrictive)
+            const existing = fieldMetadata.get(fieldId);
+            const required = (fieldData as any).required || (existing?.required ?? false);
+            const allowedValues = (fieldData as any).allowedValues || existing?.allowedValues;
+            
+            fieldMetadata.set(fieldId, {
+              required,
+              allowedValues
+            });
+          }
+        }
+      }
+    }
+
+    return fieldMetadata;
   }
 
   private static async fetchIssue(

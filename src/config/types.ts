@@ -3,6 +3,12 @@ export interface FieldMapping {
   name: string;
   type: string;
   confidence?: number;
+  required?: boolean;
+  allowedValues?: Array<{
+    id: string;
+    value: string;
+    self?: string;
+  }>;
 }
 
 export interface ProjectConfig {

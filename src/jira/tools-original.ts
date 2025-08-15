@@ -3,10 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket } from "./api.js";
 import { formatDescription, formatAcceptanceCriteria } from "./formatting.js";
 import { getJiraIssueId } from "../utils.js";
-import { 
-  getZephyrTestSteps, 
-  addZephyrTestStep 
-} from "../zephyr/index.js";
+// Zephyr functionality removed
 import { DynamicFieldResolver, extractProjectKey } from "../config/helpers.js";
 import { ConfigurationError } from "../config/types.js";
 

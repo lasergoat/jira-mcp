@@ -1,18 +1,15 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import fetch from "node-fetch";
-import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket, addJiraComment, uploadJiraAttachment, getJiraFields, getJiraTransitions, transitionJiraTicket, getJiraComments, getJiraAttachments, deleteJiraAttachment, getRawTicketData } from "./api.js";
-import { updateJiraComment, deleteJiraComment, getFullTicketDetails, searchJiraUsers, validateEpic, resolveEpicKey, validateComponents, getProjectComponents, resolveUser, resolveSprintId, validateTicketKey, getErrorSuggestions } from "./api-extended.js";
+import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket, addJiraComment, uploadJiraAttachment, getJiraFields, getJiraTransitions, transitionJiraTicket, getJiraComments, getJiraAttachments, deleteJiraAttachment } from "./api.js";
+import { updateJiraComment, deleteJiraComment, getFullTicketDetails, searchJiraUsers, validateEpic, resolveEpicKey, validateComponents, getProjectComponents, resolveUser, resolveSprintId, validateTicketKey, getErrorSuggestions, getRawTicketData } from "./api-extended.js";
 import { preferencesManager } from "./preferences.js";
 import { formatDescription, formatAcceptanceCriteria } from "./formatting.js";
 import { getJiraIssueId } from "../utils.js";
-import { 
-  getZephyrTestSteps, 
-  addZephyrTestStep 
-} from "../zephyr/index.js";
 import { DynamicFieldResolver, extractProjectKey, extractProjectKeyWithDefault } from "../config/helpers.js";
 import { ConfigurationError } from "../config/types.js";
 import { configManager } from "../config/tools.js";
+import { getAuth, getJiraHost, CredentialsNotConfiguredError, credentialsManager } from "../auth/index.js";
 
 // Check if auto-creation of test tickets is enabled (default to true)
 const autoCreateTestTickets = process.env.AUTO_CREATE_TEST_TICKETS !== "false";
@@ -61,8 +58,10 @@ export function registerJiraTools(server: McpServer) {
       link_to,
       link_type,
     }) => {
-      const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue`;
-      const formattedDescription = formatDescription(description);
+      try {
+        const jiraHost = await getJiraHost();
+        const jiraUrl = `https://${jiraHost}/rest/api/3/issue`;
+        const formattedDescription = formatDescription(description);
 
       // Create field resolver
       const fieldResolver = new DynamicFieldResolver();
@@ -119,7 +118,7 @@ export function registerJiraTools(server: McpServer) {
         if (productField && productValue && productId) {
           payload.fields[productField] = [
             {
-              self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${productId}`,
+              self: `https://${jiraHost}/rest/api/3/customFieldOption/${productId}`,
               value: productValue,
               id: productId,
             },
@@ -143,7 +142,7 @@ export function registerJiraTools(server: McpServer) {
 
           if (categoryOptionId && categoryOptionValue) {
             payload.fields[categoryField] = {
-              self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${categoryOptionId}`,
+              self: `https://${jiraHost}/rest/api/3/customFieldOption/${categoryOptionId}`,
               value: categoryOptionValue,
               id: categoryOptionId,
             };
@@ -152,17 +151,83 @@ export function registerJiraTools(server: McpServer) {
 
         // Add origination field if provided or use default from env
         const originationField = await fieldResolver.getFieldId('origination', 'JIRA_ORIGINATION_FIELD');
-        const defaultOrigination = origination || process.env.JIRA_DEFAULT_ORIGINATION_VALUE;
-        const originationId = process.env.JIRA_DEFAULT_ORIGINATION_ID;
-
-        if (originationField && defaultOrigination && originationId) {
-          payload.fields[originationField] = [
-            {
-              self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${originationId}`,
-              value: defaultOrigination,
-              id: originationId,
-            },
-          ];
+        const originationValue = origination || process.env.JIRA_DEFAULT_ORIGINATION_VALUE;
+        
+        // Check if origination is required
+        const projectConfig = await configManager.getProjectConfig(resolvedProjectKey);
+        const originationConfig = projectConfig?.fields?.origination;
+        
+        if (originationConfig?.required && !originationValue) {
+          // Origination is required but not provided
+          const availableValues = originationConfig.allowedValues?.map(v => v.value).slice(0, 10).join(', ') || '';
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Error: Origination field is required for project ${resolvedProjectKey}.\n\nAvailable values: ${availableValues}\n\nPlease provide the origination parameter when creating the ticket.`
+            }],
+          };
+        }
+        
+        if (originationField && originationValue) {
+          if (originationConfig?.allowedValues && originationConfig.allowedValues.length > 0) {
+            // Find the matching value from allowed values
+            const matchingValue = originationConfig.allowedValues.find(
+              v => v.value.toLowerCase() === originationValue.toLowerCase()
+            );
+            
+            if (matchingValue) {
+              payload.fields[originationField] = [
+                {
+                  self: `https://${jiraHost}/rest/api/3/customFieldOption/${matchingValue.id}`,
+                  value: matchingValue.value,
+                  id: matchingValue.id,
+                },
+              ];
+            } else {
+              // Return error listing available values
+              const availableValues = originationConfig.allowedValues.map(v => v.value).join(', ');
+              return {
+                content: [{
+                  type: "text" as const,
+                  text: `Error: Invalid origination value "${originationValue}". Available values: ${availableValues}`
+                }],
+              };
+            }
+          } else {
+            // No config with allowed values - try to use the value directly with ID lookup
+            // Map common origination values to their IDs (from our earlier discovery)
+            const knownValues: Record<string, string> = {
+              "road map": "10088",
+              "improvement": "10089",
+              "tech enablement": "10090",
+              "support": "10091",
+              "maintenance": "10092",
+              "security / compliance remediation": "10093",
+              "incident remediation": "10094",
+              "operations": "10095",
+              "overhead": "10096"
+            };
+            
+            const lookupKey = originationValue.toLowerCase();
+            const originationId = knownValues[lookupKey] || process.env.JIRA_DEFAULT_ORIGINATION_ID;
+            
+            if (originationId) {
+              payload.fields[originationField] = [
+                {
+                  self: `https://${jiraHost}/rest/api/3/customFieldOption/${originationId}`,
+                  value: originationValue,
+                  id: originationId,
+                },
+              ];
+            } else {
+              return {
+                content: [{
+                  type: "text" as const,
+                  text: `Error: Cannot map origination value "${originationValue}" to an ID. Please run 'configure-project-fields' for project ${resolvedProjectKey} to update field mappings, or use one of: Road Map, Improvement, Tech Enablement, Support, Maintenance, Security / Compliance Remediation, Incident Remediation, Operations, Overhead`
+                }],
+              };
+            }
+          }
         }
       }
 
@@ -182,9 +247,7 @@ export function registerJiraTools(server: McpServer) {
 
       // Add parent epic if provided
       if (parent_epic !== undefined) {
-        const auth = Buffer.from(
-          `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-        ).toString("base64");
+        const auth = await getAuth();
         
         // Validate and resolve epic
         const epicValidation = await validateEpic(parent_epic, auth);
@@ -213,12 +276,11 @@ export function registerJiraTools(server: McpServer) {
 
       // Add sprint if provided
       if (sprint !== undefined) {
-        const auth = Buffer.from(
-          `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-        ).toString("base64");
+        const auth = await getAuth();
         
         // Resolve sprint input to sprint ID
-        const sprintResolution = await resolveSprintId(sprint, resolvedProjectKey || 'VIP', auth);
+        const projectForSprint = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
+        const sprintResolution = await resolveSprintId(sprint, projectForSprint, auth, jiraHost);
         
         if (!sprintResolution.success) {
           return {
@@ -256,7 +318,7 @@ export function registerJiraTools(server: McpServer) {
         if (storyReadinessField) {
           const storyReadinessId = story_readiness === "Yes" ? "18256" : "18257";
           payload.fields[storyReadinessField] = {
-            self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${storyReadinessId}`,
+            self: `https://${jiraHost}/rest/api/3/customFieldOption/${storyReadinessId}`,
             value: story_readiness,
             id: storyReadinessId,
           };
@@ -267,11 +329,10 @@ export function registerJiraTools(server: McpServer) {
 
       // Add components if provided
       if (components !== undefined && components.length > 0) {
-        const auth = Buffer.from(
-          `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-        ).toString("base64");
+        const auth = await getAuth();
         
-        const componentsValidation = await validateComponents(components, resolvedProjectKey || 'VIP', auth);
+        const projectForComponents = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
+        const componentsValidation = await validateComponents(components, projectForComponents, auth);
         
         if (!componentsValidation.success) {
           return {
@@ -299,11 +360,9 @@ export function registerJiraTools(server: McpServer) {
 
       // Add assignee if provided
       if (assignee !== undefined) {
-        const auth = Buffer.from(
-          `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-        ).toString("base64");
+        const auth = await getAuth();
         
-        const userResolution = await resolveUser(assignee, auth, resolvedProjectKey);
+        const userResolution = await resolveUser(assignee, auth, resolvedProjectKey, jiraHost);
         
         if (!userResolution.success) {
           return {
@@ -343,12 +402,10 @@ export function registerJiraTools(server: McpServer) {
       }
 
       // Create the auth token
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
 
       // Create the main ticket
-      const result = await createJiraTicket(payload, auth);
+      const result = await createJiraTicket(payload, auth, jiraHost);
 
       if (!result.success) {
         // Check if it's a field-related error
@@ -448,7 +505,7 @@ export function registerJiraTools(server: McpServer) {
           },
         };
 
-        const testResult = await createJiraTicket(testPayload, auth);
+        const testResult = await createJiraTicket(testPayload, auth, jiraHost);
 
         if (testResult.success) {
           responseText += `\nCreated test ticket: ${testResult.data.key}`;
@@ -467,49 +524,6 @@ export function registerJiraTools(server: McpServer) {
             }
           }
 
-          // If acceptance criteria exists, convert to test steps
-          if (acceptance_criteria) {
-            try {
-              const testSteps = acceptance_criteria
-                .split(/\n+/)
-                .filter((line) => line.trim())
-                .map((line, index) => ({
-                  description: line.trim(),
-                  testData: "",
-                  expectedResult: "Completed successfully",
-                  orderId: index,
-                }));
-
-              for (const step of testSteps) {
-                if (testResult.data.id) {
-                  // We need to fetch the ticket to get project ID
-                  const getUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${testResult.data.key}`;
-                  const getResponse = await fetch(getUrl, {
-                    method: "GET",
-                    headers: {
-                      Authorization: `Basic ${auth}`,
-                    },
-                  });
-                  
-                  if (getResponse.ok) {
-                    const testTicketData = await getResponse.json() as any;
-                    await addZephyrTestStep(
-                      testResult.data.id,
-                      testTicketData.fields.project.id,
-                      step.description,
-                      step.testData,
-                      step.expectedResult
-                    );
-                  }
-                }
-              }
-
-              responseText += `\nAdded ${testSteps.length} test steps to test ticket`;
-            } catch (error) {
-              console.error("Error adding test steps:", error);
-              responseText += `\nWarning: Could not add test steps to test ticket`;
-            }
-          }
         }
       }
 
@@ -550,6 +564,22 @@ export function registerJiraTools(server: McpServer) {
           ],
         };
       }
+      } catch (error) {
+        if (error instanceof CredentialsNotConfiguredError) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: error.message
+            }]
+          };
+        }
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Error creating ticket: ${error instanceof Error ? error.message : String(error)}`
+          }]
+        };
+      }
     }
   );
 
@@ -567,12 +597,11 @@ export function registerJiraTools(server: McpServer) {
     },
     async ({ outward_issue, inward_issue, link_type }) => {
       // TODO: Add dynamic configuration support
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
-      const outwardIssueResult = await getJiraIssueId(outward_issue, auth);
-      const inwardIssueResult = await getJiraIssueId(inward_issue, auth);
+      const outwardIssueResult = await getJiraIssueId(outward_issue, auth, jiraHost);
+      const inwardIssueResult = await getJiraIssueId(inward_issue, auth, jiraHost);
 
       if (!outwardIssueResult.success || !outwardIssueResult.id) {
         return {
@@ -600,7 +629,8 @@ export function registerJiraTools(server: McpServer) {
         outward_issue,
         inward_issue,
         link_type,
-        auth
+        auth,
+        jiraHost
       );
 
       if (!result.success) {
@@ -633,10 +663,9 @@ export function registerJiraTools(server: McpServer) {
       ticket_id: z.string().min(1, "Ticket ID is required"),
     },
     async ({ ticket_id }) => {
-      const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticket_id}`;
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const jiraHost = await getJiraHost();
+      const jiraUrl = `https://${jiraHost}/rest/api/3/issue/${ticket_id}`;
+      const auth = await getAuth();
 
       try {
         const response = await fetch(jiraUrl, {
@@ -727,10 +756,9 @@ export function registerJiraTools(server: McpServer) {
     },
     async ({ ticket_id, include_comments }) => {
       // TODO: Add dynamic configuration support
-      const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticket_id}`;
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const jiraHost = await getJiraHost();
+      const jiraUrl = `https://${jiraHost}/rest/api/3/issue/${ticket_id}`;
+      const auth = await getAuth();
 
       try {
         const response = await fetch(jiraUrl, {
@@ -912,9 +940,8 @@ ${description}`;
     },
     async ({ issue_type, max_results = 10, additional_criteria, project_key, labels }) => {
       // TODO: Add full dynamic configuration support
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
       const resolvedProjectKey = await configManager.getProjectKeyWithFallback(project_key);
       
@@ -929,7 +956,7 @@ ${description}`;
         jql += ` AND (${additional_criteria})`;
       }
 
-      const result = await searchJiraTickets(jql, max_results, auth);
+      const result = await searchJiraTickets(jql, max_results, auth, jiraHost);
 
       if (!result.success) {
         return {
@@ -995,6 +1022,9 @@ ${description}`;
     async (params) => {
       const { ticket_id, custom_fields, ...standardFields } = params;
       // TODO: Add full dynamic configuration support
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
+      
       const fieldResolver = new DynamicFieldResolver();
       const resolvedProjectKey = extractProjectKey(undefined, ticket_id);
       
@@ -1022,11 +1052,7 @@ ${description}`;
       }
 
       if (standardFields.assignee !== undefined) {
-        const auth = Buffer.from(
-          `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-        ).toString("base64");
-        
-        const userResolution = await resolveUser(standardFields.assignee, auth, resolvedProjectKey);
+        const userResolution = await resolveUser(standardFields.assignee, auth, resolvedProjectKey, jiraHost);
         
         if (!userResolution.success) {
           return {
@@ -1050,13 +1076,11 @@ ${description}`;
       if (standardFields.components !== undefined) {
         // Validate components exist in the project
         if (standardFields.components.length > 0) {
-          const auth = Buffer.from(
-            `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-          ).toString("base64");
+          const auth = await getAuth();
           
           const componentsValidation = await validateComponents(
             standardFields.components, 
-            resolvedProjectKey || 'VIP', 
+            resolvedProjectKey || await configManager.getProjectKeyWithFallback(), 
             auth
           );
           
@@ -1109,10 +1133,6 @@ ${description}`;
               case 'parent':
                 // Validate epic if parent is being set
                 if (value) {
-                  const auth = Buffer.from(
-                    `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-                  ).toString("base64");
-                  
                   const epicValidation = await validateEpic(value as string, auth);
                   
                   if (!epicValidation.success) {
@@ -1141,11 +1161,8 @@ ${description}`;
                 }
               case 'sprint':
                 // Resolve sprint input to sprint ID using smart resolution
-                const auth = Buffer.from(
-                  `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-                ).toString("base64");
-                
-                const sprintResolution = await resolveSprintId(String(value), resolvedProjectKey || 'VIP', auth);
+                const projectForSprint = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
+                const sprintResolution = await resolveSprintId(String(value), projectForSprint, auth, jiraHost);
                 
                 if (!sprintResolution.success) {
                   return {
@@ -1168,7 +1185,7 @@ ${description}`;
               case 'story_readiness':
                 const storyReadinessId = value === "Yes" ? "18256" : "18257";
                 payload.fields[fieldId] = {
-                  self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${storyReadinessId}`,
+                  self: `https://${jiraHost}/rest/api/3/customFieldOption/${storyReadinessId}`,
                   value: value,
                   id: storyReadinessId,
                 };
@@ -1177,7 +1194,7 @@ ${description}`;
                 const originationId = process.env.JIRA_DEFAULT_ORIGINATION_ID;
                 if (originationId) {
                   payload.fields[fieldId] = [{
-                    self: `https://${process.env.JIRA_HOST}/rest/api/3/customFieldOption/${originationId}`,
+                    self: `https://${jiraHost}/rest/api/3/customFieldOption/${originationId}`,
                     value: value,
                     id: originationId,
                   }];
@@ -1229,11 +1246,7 @@ ${description}`;
         };
       }
 
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
-
-      const result = await updateJiraTicket(ticket_id, payload, auth);
+      const result = await updateJiraTicket(ticket_id, payload, auth, jiraHost);
 
       if (!result.success) {
         return {
@@ -1307,11 +1320,10 @@ ${description}`;
       // Order by priority and updated date
       jql += " ORDER BY priority DESC, updated DESC";
 
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
-      const result = await searchJiraTickets(jql, max_results as number, auth);
+      const result = await searchJiraTickets(jql, max_results as number, auth, jiraHost);
 
       if (!result.success) {
         return {
@@ -1363,7 +1375,7 @@ ${description}`;
           }
         }
         
-        output += `  Link: https://${process.env.JIRA_HOST}/browse/${issue.key}\n\n`;
+        output += `  Link: https://${jiraHost}/browse/${issue.key}\n\n`;
       });
 
       return {
@@ -1386,9 +1398,7 @@ ${description}`;
       comment: z.string().min(1, "Comment text is required"),
     },
     async ({ ticket_id, comment }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
 
       const result = await addJiraComment(ticket_id, comment, auth);
 
@@ -1424,9 +1434,7 @@ ${description}`;
       new_comment: z.string().min(1, "New comment text is required"),
     },
     async ({ ticket_id, comment_id, new_comment }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
 
       const result = await updateJiraComment(ticket_id, comment_id, new_comment, auth);
 
@@ -1461,9 +1469,7 @@ ${description}`;
       comment_id: z.string().min(1, "Comment ID is required"),
     },
     async ({ ticket_id, comment_id }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
 
       const result = await deleteJiraComment(ticket_id, comment_id, auth);
 
@@ -1500,9 +1506,7 @@ ${description}`;
       mime_type: z.string().default("application/octet-stream"),
     },
     async ({ ticket_id, file_name, file_content, mime_type }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
 
       const result = await uploadJiraAttachment(ticket_id, file_name, file_content, mime_type, auth);
 
@@ -1556,14 +1560,13 @@ ${description}`;
       sample_ticket: z.string().optional().describe("Ticket ID to use for transition discovery"),
     },
     async ({ project_key, include_transitions, sample_ticket }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
       const resolvedProjectKey = await configManager.getProjectKeyWithFallback(project_key);
       
       // Get all fields
-      const fieldsResult = await getJiraFields(auth);
+      const fieldsResult = await getJiraFields(auth, jiraHost);
       if (!fieldsResult.success) {
         return {
           content: [{
@@ -1583,7 +1586,8 @@ ${description}`;
       }) || [];
 
       // Get project components
-      const componentsResult = await getProjectComponents(resolvedProjectKey || 'VIP', auth);
+      const projectForComponents = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
+      const componentsResult = await getProjectComponents(projectForComponents, auth);
       
       let output = `**Project Schema for ${resolvedProjectKey}**\n\n`;
       
@@ -1607,7 +1611,8 @@ ${description}`;
       output += `**Fields (${relevantFields.length} available):**\n\n`;
 
       // Get user preferences
-      const prefs = preferencesManager.getProjectPreferences(resolvedProjectKey || 'VIP');
+      const projectForPrefs = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
+      const prefs = preferencesManager.getProjectPreferences(projectForPrefs);
       const defaultFields = preferencesManager.getDefaultImportantFields();
 
       // Group fields by category for better organization
@@ -1616,8 +1621,8 @@ ${description}`;
       
       // Helper function to format field info
       const formatField = (field: any) => {
-        const isImportant = preferencesManager.isFieldImportant(resolvedProjectKey || 'VIP', field.name.toLowerCase().replace(/\s+/g, '_'));
-        const isIgnored = preferencesManager.isFieldIgnored(resolvedProjectKey || 'VIP', field.id);
+        const isImportant = preferencesManager.isFieldImportant(projectForPrefs, field.name.toLowerCase().replace(/\s+/g, '_'));
+        const isIgnored = preferencesManager.isFieldIgnored(projectForPrefs, field.id);
         
         let status = '';
         if (isImportant) status = ' ⭐ (important)';
@@ -1700,7 +1705,7 @@ ${description}`;
 
       // Get transitions if requested
       if (include_transitions && sample_ticket) {
-        const transitionsResult = await getJiraTransitions(sample_ticket, auth);
+        const transitionsResult = await getJiraTransitions(sample_ticket, auth, jiraHost);
         if (transitionsResult.success && transitionsResult.transitions) {
           output += `**Available Transitions for ${sample_ticket}:**\n\n`;
           transitionsResult.transitions.forEach(transition => {
@@ -1711,8 +1716,9 @@ ${description}`;
       }
 
       output += `**Important Fields (defaults + learned):**\n`;
+      const projectForMapping = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
       defaultFields.forEach(field => {
-        const mapping = preferencesManager.getFieldMapping(resolvedProjectKey || 'VIP', field);
+        const mapping = preferencesManager.getFieldMapping(projectForMapping, field);
         if (mapping) {
           output += `• ${field} → ${mapping}\n`;
         } else {
@@ -1760,12 +1766,11 @@ ${description}`;
       comment: z.string().optional(),
     },
     async ({ ticket_id, target_status, comment }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
       // Get available transitions
-      const transitionsResult = await getJiraTransitions(ticket_id, auth);
+      const transitionsResult = await getJiraTransitions(ticket_id, auth, jiraHost);
       if (!transitionsResult.success) {
         return {
           content: [{
@@ -1793,7 +1798,7 @@ ${description}`;
       }
 
       // Execute transition
-      const result = await transitionJiraTicket(ticket_id, matchingTransition.id, comment, auth);
+      const result = await transitionJiraTicket(ticket_id, matchingTransition.id, comment, auth, jiraHost);
       
       if (!result.success) {
         return {
@@ -1824,14 +1829,15 @@ ${description}`;
       return_format: z.enum(["simple", "full"]).optional().default("simple").describe("Return format - simple returns just essential fields"),
     },
     async ({ query, project, active_only, return_format }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const credentials = await credentialsManager.getCredentials();
+      const jiraHost = credentials?.host;
 
       const result = await searchJiraUsers(query, auth, {
         project,
         activeOnly: active_only,
         returnFormat: return_format,
+        jiraHost,
       });
 
       if (!result.success) {
@@ -2066,9 +2072,8 @@ This structure helps create professional, scannable tickets that communicate cle
       max_results: z.number().min(1).max(20).default(10),
     },
     async ({ project_key, include_future, max_results }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
       const resolvedProjectKey = await configManager.getProjectKeyWithFallback(project_key);
       
@@ -2090,7 +2095,7 @@ This structure helps create professional, scannable tickets that communicate cle
       jql += " ORDER BY updated DESC";
 
       try {
-        const searchResult = await searchJiraTickets(jql, max_results, auth);
+        const searchResult = await searchJiraTickets(jql, max_results, auth, jiraHost);
         
         if (!searchResult.success) {
           return {
@@ -2185,9 +2190,8 @@ This structure helps create professional, scannable tickets that communicate cle
       project_key: z.string().optional().describe("Project key (uses default if not specified)"),
     },
     async ({ project_key }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
       const resolvedProjectKey = await configManager.getProjectKeyWithFallback(project_key);
       
@@ -2195,7 +2199,7 @@ This structure helps create professional, scannable tickets that communicate cle
       const jql = `project = "${resolvedProjectKey}" AND sprint in (openSprints()) ORDER BY updated DESC`;
 
       try {
-        const searchResult = await searchJiraTickets(jql, 10, auth);
+        const searchResult = await searchJiraTickets(jql, 10, auth, jiraHost);
         
         if (!searchResult.success) {
           return {
@@ -2272,11 +2276,10 @@ This structure helps create professional, scannable tickets that communicate cle
       ticket_id: z.string().min(1).describe("Ticket ID to get raw data for"),
     },
     async ({ ticket_id }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
-      const result = await getRawTicketData(ticket_id, auth);
+      const result = await getRawTicketData(ticket_id, auth, jiraHost);
       
       if (!result.success) {
         return {
@@ -2313,9 +2316,8 @@ This structure helps create professional, scannable tickets that communicate cle
       max_results: z.number().min(1).max(50).default(10),
     },
     async ({ project_key, search_term, status, max_results }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
       const resolvedProjectKey = await configManager.getProjectKeyWithFallback(project_key);
       
@@ -2333,7 +2335,7 @@ This structure helps create professional, scannable tickets that communicate cle
       jql += " ORDER BY created DESC";
 
       try {
-        const searchResult = await searchJiraTickets(jql, max_results, auth);
+        const searchResult = await searchJiraTickets(jql, max_results, auth, jiraHost);
         
         if (!searchResult.success) {
           return {
@@ -2392,7 +2394,8 @@ This structure helps create professional, scannable tickets that communicate cle
             }
           }
           
-          output += `  Link: https://${process.env.JIRA_HOST}/browse/${epic.key}\n\n`;
+          const jiraHost = await getJiraHost();
+          output += `  Link: https://${jiraHost}/browse/${epic.key}\n\n`;
         }
         
         output += `**To use an epic when creating tickets:**\n`;
@@ -2449,12 +2452,11 @@ This structure helps create professional, scannable tickets that communicate cle
       link_type,
       project_key,
     }) => {
-      const auth = Buffer.from(
-        `${process.env.JIRA_USERNAME}:${process.env.JIRA_API_TOKEN}`
-      ).toString("base64");
+      const auth = await getAuth();
 
       // First, get the source ticket details
-      const sourceTicketUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${source_ticket}`;
+      const jiraHost = await getJiraHost();
+      const sourceTicketUrl = `https://${jiraHost}/rest/api/3/issue/${source_ticket}`;
       
       try {
         const sourceResponse = await fetch(sourceTicketUrl, {
@@ -2516,7 +2518,7 @@ This structure helps create professional, scannable tickets that communicate cle
         // Copy/override assignee with smart resolution
         const assigneeToUse = assignee || sourceFields.assignee?.accountId;
         if (assigneeToUse) {
-          const userResolution = await resolveUser(assigneeToUse, auth, resolvedProjectKey);
+          const userResolution = await resolveUser(assigneeToUse, auth, resolvedProjectKey, jiraHost);
           if (userResolution.success && userResolution.accountId) {
             payload.fields.assignee = { accountId: userResolution.accountId };
           }
@@ -2548,7 +2550,8 @@ This structure helps create professional, scannable tickets that communicate cle
           }
         }
         if (sprintToUse) {
-          const sprintResolution = await resolveSprintId(sprintToUse, resolvedProjectKey || 'VIP', auth);
+          const projectForSprint = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
+          const sprintResolution = await resolveSprintId(sprintToUse, projectForSprint, auth, jiraHost);
           if (sprintResolution.success && sprintResolution.sprintId) {
             const sprintField = await fieldResolver.getFieldId('sprint', 'JIRA_SPRINT_FIELD');
             if (sprintField) {
@@ -2569,7 +2572,8 @@ This structure helps create professional, scannable tickets that communicate cle
         // Copy/override components with validation
         const componentsToUse = components || (sourceFields.components ? sourceFields.components.map((c: any) => c.name) : undefined);
         if (componentsToUse && componentsToUse.length > 0) {
-          const componentsValidation = await validateComponents(componentsToUse, resolvedProjectKey || 'VIP', auth);
+          const projectForComponents = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
+          const componentsValidation = await validateComponents(componentsToUse, projectForComponents, auth);
           if (componentsValidation.success && componentsValidation.components) {
             payload.fields.components = componentsValidation.components;
           }
@@ -2588,7 +2592,7 @@ This structure helps create professional, scannable tickets that communicate cle
         }
 
         // Create the ticket
-        const result = await createJiraTicket(payload, auth);
+        const result = await createJiraTicket(payload, auth, jiraHost);
 
         if (!result.success) {
           return {

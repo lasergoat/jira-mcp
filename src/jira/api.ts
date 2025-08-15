@@ -10,12 +10,14 @@ export * from "./api-extended.js";
 export async function updateJiraTicket(
   ticketKey: string,
   payload: any,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   errorMessage?: string;
 }> {
-  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/issue/${ticketKey}`;
 
   console.error("JIRA Update URL:", jiraUrl);
   console.error("JIRA Update Payload:", JSON.stringify(payload, null, 2));
@@ -67,13 +69,15 @@ export async function updateJiraTicket(
 // Helper function to create a JIRA ticket
 export async function createJiraTicket(
   payload: any,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   data: JiraCreateResponse;
   errorMessage?: string;
 }> {
-  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/issue`;
 
   console.error("JIRA URL:", jiraUrl);
   console.error("JIRA Payload:", JSON.stringify(payload, null, 2));
@@ -129,9 +133,11 @@ export async function createTicketLink(
   outwardIssue: string,
   inwardIssue: string,
   linkType: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{ success: boolean; errorMessage?: string }> {
-  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issueLink`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/issueLink`;
 
   const payload = {
     outwardIssue: {
@@ -186,15 +192,15 @@ export async function createTicketLink(
 export async function searchJiraTickets(
   jql: string,
   maxResults: number,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   data: JiraSearchResponse;
   errorMessage?: string;
 }> {
-  const jiraUrl = `https://${
-    process.env.JIRA_HOST
-  }/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}`;
 
   console.error("JIRA Search URL:", jiraUrl);
   console.error("JIRA Search JQL:", jql);

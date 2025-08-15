@@ -5,13 +5,15 @@ import { DynamicFieldResolver } from "../config/helpers.js";
 
 // Helper function to get all fields in a Jira instance
 export async function getJiraFields(
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   fields?: JiraField[];
   errorMessage?: string;
 }> {
-  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/field`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/field`;
 
   try {
     const response = await fetch(jiraUrl, {
@@ -43,13 +45,15 @@ export async function getJiraFields(
 // Helper function to get available transitions for a ticket
 export async function getJiraTransitions(
   ticketKey: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   transitions?: JiraTransition[];
   errorMessage?: string;
 }> {
-  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}/transitions`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/issue/${ticketKey}/transitions`;
 
   try {
     const response = await fetch(jiraUrl, {
@@ -83,12 +87,14 @@ export async function transitionJiraTicket(
   ticketKey: string,
   transitionId: string,
   comment?: string,
-  auth?: string
+  auth?: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   errorMessage?: string;
 }> {
-  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}/transitions`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/issue/${ticketKey}/transitions`;
 
   const payload: any = {
     transition: { id: transitionId }
@@ -449,14 +455,16 @@ ${description}`;
 // Temporary debug function to get raw ticket data
 export async function getRawTicketData(
   ticketKey: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   rawData?: any;
   errorMessage?: string;
 }> {
   try {
-    const url = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}`;
+    const host = jiraHost || process.env.JIRA_HOST;
+    const url = `https://${host}/rest/api/3/issue/${ticketKey}`;
     const response = await fetch(url, {
       method: "GET",
       headers: {
@@ -488,6 +496,7 @@ export async function searchJiraUsers(
     project?: string;
     activeOnly?: boolean;
     returnFormat?: "simple" | "full";
+    jiraHost?: string;
   }
 ): Promise<{
   success: boolean;
@@ -504,7 +513,8 @@ export async function searchJiraUsers(
   // Note: JIRA doesn't have direct project filtering in user search API
   // We'll need to filter results if project is specified
   
-  let jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/user/search?${params.toString()}`;
+  const host = options?.jiraHost || process.env.JIRA_HOST;
+  let jiraUrl = `https://${host}/rest/api/3/user/search?${params.toString()}`;
 
   try {
     const response = await fetch(jiraUrl, {
@@ -518,7 +528,7 @@ export async function searchJiraUsers(
       // If query search fails, try to find by email directly
       if (query.includes('@')) {
         params.append('accountType', 'atlassian');
-        const emailUrl = `https://${process.env.JIRA_HOST}/rest/api/3/user/search?${params.toString()}`;
+        const emailUrl = `https://${host}/rest/api/3/user/search?${params.toString()}`;
         const emailResponse = await fetch(emailUrl, {
           method: "GET",
           headers: {
@@ -597,7 +607,8 @@ function applyUserFilters(
 // Helper function to get the current active sprint for a project
 export async function getCurrentSprint(
   projectKey: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   sprintId?: string;
@@ -611,8 +622,10 @@ export async function getCurrentSprint(
   
   const jql = `project = "${projectKey}" AND sprint in (openSprints()) ORDER BY updated DESC`;
   
+  const host = jiraHost || process.env.JIRA_HOST;
+  
   try {
-    const searchUrl = `https://${process.env.JIRA_HOST}/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=10&fields=${sprintField}`;
+    const searchUrl = `https://${host}/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=10&fields=${sprintField}`;
     
     const response = await fetch(searchUrl, {
       method: "GET",
@@ -666,7 +679,8 @@ export async function getCurrentSprint(
 export async function resolveSprintId(
   sprintInput: string,
   projectKey: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   sprintId?: string;
@@ -677,9 +691,11 @@ export async function resolveSprintId(
     return { success: true, sprintId: sprintInput };
   }
   
+  const host = jiraHost || process.env.JIRA_HOST;
+  
   // Handle "current" keyword
   if (sprintInput.toLowerCase() === "current") {
-    const currentSprint = await getCurrentSprint(projectKey, auth);
+    const currentSprint = await getCurrentSprint(projectKey, auth, host);
     if (currentSprint.success && currentSprint.sprintId) {
       return { success: true, sprintId: currentSprint.sprintId };
     }
@@ -697,7 +713,7 @@ export async function resolveSprintId(
     const sprintField = await fieldResolver.getFieldId('sprint', 'JIRA_SPRINT_FIELD') || 'customfield_10020';
     
     // Search for tickets in all sprints to find sprint by name
-    const searchUrl = `https://${process.env.JIRA_HOST}/rest/api/3/search?jql=${encodeURIComponent(
+    const searchUrl = `https://${host}/rest/api/3/search?jql=${encodeURIComponent(
       `project = "${projectKey}" AND sprint in (openSprints(), futureSprints()) ORDER BY updated DESC`
     )}&maxResults=50&fields=${sprintField}`;
     
@@ -1030,15 +1046,16 @@ export async function validateComponents(
 export async function resolveUser(
   userInput: string,
   auth: string,
-  projectKey?: string
+  projectKey?: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   accountId?: string;
   displayName?: string;
   errorMessage?: string;
 }> {
-  // If it already looks like an account ID (24-char hex), return it
-  if (/^[0-9a-f]{24}$/i.test(userInput)) {
+  // Check for both old (24-char hex) and new (6digit:uuid) account ID formats
+  if (/^[0-9a-f]{24}$/i.test(userInput) || /^\d{6}:[0-9a-f-]+$/i.test(userInput)) {
     return { 
       success: true, 
       accountId: userInput,
@@ -1051,7 +1068,8 @@ export async function resolveUser(
     const searchResult = await searchJiraUsers(userInput, auth, {
       project: projectKey,
       activeOnly: true,
-      returnFormat: "simple"
+      returnFormat: "simple",
+      jiraHost
     });
     
     if (!searchResult.success) {

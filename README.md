@@ -2,9 +2,36 @@
 
 A comprehensive [Model Context Protocol](https://www.anthropic.com/news/model-context-protocol) server for seamless JIRA integration with Claude. This advanced tool provides extensive JIRA project management capabilities including dynamic field configuration, intelligent ticket management, sprint planning, user management, and comprehensive search features.
 
+## Quick Start 🚀
+
+**Get started in 3 minutes with zero configuration:**
+
+1. **Install the MCP**
+   ```bash
+   npm install -g jira-mcp
+   ```
+
+2. **Add to Claude Desktop** (minimal config)
+   ```json
+   {
+     "mcpServers": {
+       "jira-mcp": {
+         "command": "jira-mcp"
+       }
+     }
+   }
+   ```
+
+3. **Start Using** - Claude will automatically prompt for credentials on first use:
+   - "Create a Jira ticket for implementing user authentication"
+   - "Show me all tickets in the current sprint"
+   - "Search for bugs assigned to me"
+
+That's it! No manual configuration needed. Claude will ask for your Jira credentials when you first use a command.
+
 ## Overview
 
-This enhanced JIRA MCP is a sophisticated Node.js/TypeScript application that provides a feature-rich Model Context Protocol (MCP) server for deep JIRA and Zephyr integration. It enables AI assistants to perform comprehensive JIRA operations including dynamic field discovery, project configuration management, advanced ticket operations, sprint management, user administration, and test management through an intelligent, standardized protocol.
+This enhanced JIRA MCP is a sophisticated Node.js/TypeScript application that provides a feature-rich Model Context Protocol (MCP) server for deep JIRA integration. It enables AI assistants to perform comprehensive JIRA operations including dynamic field discovery, project configuration management, advanced ticket operations, sprint management, user administration, and comprehensive ticket management through an intelligent, standardized protocol.
 
 <img width="772" alt="grafik" src="https://github.com/user-attachments/assets/a6f9afd8-7f75-4316-9421-ee7126002d2b" />
 <img width="1188" alt="grafik" src="https://github.com/user-attachments/assets/b8f089ac-4443-4a64-91c0-87b97175d9dd" />
@@ -21,7 +48,6 @@ This enhanced JIRA MCP is a sophisticated Node.js/TypeScript application that pr
   - [Required Configuration](#required-configuration)
   - [Optional Configuration](#optional-configuration)
     - [Test Ticket Creation](#test-ticket-creation)
-    - [Zephyr Integration](#zephyr-integration)
     - [Custom Field Configuration](#custom-field-configuration)
     - [Product Field Configuration](#product-field-configuration-optional)
     - [Category Field Configuration](#category-field-configuration-optional)
@@ -34,8 +60,6 @@ This enhanced JIRA MCP is a sophisticated Node.js/TypeScript application that pr
   - [search-sprints](#search-sprints)
   - [update-ticket](#update-ticket)
   - [link-tickets](#link-tickets)
-  - [get-test-steps](#get-test-steps)
-  - [add-test-steps](#add-test-steps)
 - [Project Architecture](#project-architecture)
 - [Core Components](#core-components)
 - [Authentication](#authentication)
@@ -82,10 +106,6 @@ This enhanced JIRA MCP is a sophisticated Node.js/TypeScript application that pr
 - **Attachment Management**: Upload and manage file attachments
 - **Acceptance Criteria**: Structure and format acceptance criteria properly
 
-### Test Management (Zephyr Integration)
-- **Test Step Management**: Create and retrieve detailed test steps
-- **Automated Test Ticket Creation**: Automatically create linked test tickets for stories
-- **Test Case Linking**: Maintain relationships between stories and test cases
 
 ### Developer & Debug Tools
 - **Raw Data Access**: Debug tools for inspecting raw ticket data and custom fields
@@ -166,6 +186,38 @@ This enhanced JIRA MCP is a sophisticated Node.js/TypeScript application that pr
 
 ## Configuration
 
+### Zero-Config Setup (Recommended)
+
+The easiest way to get started is with the zero-config setup. When you first use the MCP, Claude will:
+
+1. Detect that credentials are not configured
+2. Prompt you for your Jira host, username, and API token
+3. Save the credentials securely for future use
+
+**First Time Setup:**
+1. Install the MCP (see Installation section)
+2. Add the MCP to your Claude configuration with minimal setup:
+   ```json
+   {
+     "mcpServers": {
+       "jira-mcp": {
+         "command": "node",
+         "args": ["/absolute/path/to/jira-mcp/build/index.js"]
+       }
+     }
+   }
+   ```
+3. When you first try to use a Jira command, Claude will run `initialize-jira-connection` and ask for:
+   - Your Jira host (e.g., `company.atlassian.net`)
+   - Your email/username
+   - Your API token
+
+4. After initialization, run `configure-project-fields` to set up your project
+
+### Manual Configuration (Alternative)
+
+If you prefer to set up credentials manually, you can still use environment variables.
+
 ### Configuration Location
 
 Add the JIRA MCP server configuration to your Claude configuration file:
@@ -234,14 +286,6 @@ The following environment variables are **required** for the JIRA MCP server to 
 
 - `AUTO_CREATE_TEST_TICKETS`: Set to "true" (default) to automatically create linked Test tickets for Story tickets with points, or "false" to disable this feature
 
-#### Zephyr Integration
-
-These environment variables are required for the Zephyr integration to add test steps to test tickets:
-
-- `ZAPI_BASE_URL`: The base URL for the Zephyr API (default: "https://prod-api.zephyr4jiracloud.com/connect")
-- `ZAPI_ACCESS_KEY`: Your Zephyr Access Key (found in Zephyr Cloud settings under API Keys)
-- `ZAPI_SECRET_KEY`: Your Zephyr Secret Key (found in Zephyr Cloud settings under API Keys)
-- `ZAPI_JWT_EXPIRE_SEC`: JWT token expiration time in seconds (default: 3600)
 
 #### Custom Field Configuration
 
@@ -310,7 +354,11 @@ GET https://your-site.atlassian.net/rest/api/3/field
 
 ## Available Tools
 
-This enhanced MCP server provides **27 comprehensive tools** organized into the following categories:
+This enhanced MCP server provides **29 comprehensive tools** organized into the following categories:
+
+### Setup & Configuration Tools
+- **initialize-jira-connection**: Set up Jira credentials (host, username, API token)
+- **check-jira-connection**: Verify if Jira connection is configured and working
 
 ### Core Ticket Management Tools
 - **create-ticket**: Create comprehensive JIRA tickets with all field support
@@ -346,9 +394,6 @@ This enhanced MCP server provides **27 comprehensive tools** organized into the 
 - **upload-attachment**: Add file attachments to tickets
 - **get-formatting-help**: Get JIRA formatting syntax assistance
 
-### Test Management Tools (Zephyr Integration)
-- **get-test-steps**: Retrieve test steps from test tickets
-- **add-test-steps**: Add detailed test steps to test tickets
 
 ---
 
@@ -503,57 +548,6 @@ Links two JIRA tickets together with a specified relationship type.
 
 This creates a link between two tickets with the specified relationship type. For example, "PROJ-123 blocks PROJ-456".
 
-### get-test-steps
-
-Retrieves test steps from a Zephyr test ticket.
-
-**Parameters:**
-
-- `ticket_key`: The key of the test ticket to retrieve steps from (required, e.g., "PROJ-123")
-
-**Example:**
-
-```json
-{
-  "ticket_key": "PROJ-123"
-}
-```
-
-This tool retrieves all test steps associated with a test ticket in Zephyr. The response includes the step description, test data, and expected result for each step.
-
-### add-test-steps
-
-Adds test steps to a test ticket via the Zephyr integration.
-
-**Parameters:**
-
-- `ticket_key`: The key of the test ticket to add steps to (required, e.g., "PROJ-123")
-- `steps`: An array of test step objects (required), where each step object contains:
-  - `step`: The description of the test step (required)
-  - `data`: Test data for the step (optional)
-  - `result`: Expected result of the step (optional)
-
-**Example:**
-
-```json
-{
-  "ticket_key": "PROJ-123",
-  "steps": [
-    {
-      "step": "Navigate to the login page",
-      "data": "https://example.com/login",
-      "result": "Login form is displayed"
-    },
-    {
-      "step": "Enter valid credentials",
-      "data": "username=test, password=password123",
-      "result": "User is logged in successfully"
-    }
-  ]
-}
-```
-
-This tool requires Zephyr for Jira Cloud to be installed and configured. You'll need to set the Zephyr API environment variables in your configuration file.
 
 
 ## Project Architecture
@@ -571,12 +565,6 @@ jira-mcp/
 │   │   ├── index.ts          # JIRA module exports
 │   │   ├── tools.ts          # JIRA MCP tools registration
 │   │   └── types.ts          # JIRA type definitions
-│   └── zephyr/               # Zephyr integration module
-│       ├── auth.ts           # Zephyr authentication utilities
-│       ├── index.ts          # Zephyr module exports
-│       ├── test-steps.ts     # Zephyr test steps API functions
-│       ├── tools.ts          # Zephyr MCP tools registration
-│       └── types.ts          # Zephyr type definitions
 ├── util/                     # Utility scripts
 │   └── update-mcp-settings.js # Script to update MCP settings
 ├── package.json              # Project metadata and dependencies
@@ -598,7 +586,6 @@ const server = new McpServer({
 
 // Register tools
 registerJiraTools(server);
-registerZephyrTools(server);
 
 // Connect using stdio transport
 const transport = new StdioServerTransport();
@@ -617,14 +604,6 @@ The JIRA integration module provides tools for interacting with the JIRA REST AP
 
 The module uses Basic Authentication with the JIRA API and formats content according to JIRA's Atlassian Document Format (ADF).
 
-### Zephyr Integration
-
-The Zephyr integration module provides tools for managing test steps in Zephyr:
-
-1. **get-test-steps**: Retrieves test steps for a specific test ticket
-2. **add-test-steps**: Adds test steps to a test ticket
-
-The module uses JWT authentication with the Zephyr API, generating signed tokens for each request.
 
 
 ## Authentication
@@ -639,20 +618,6 @@ const auth = Buffer.from(
 ).toString("base64");
 ```
 
-### Zephyr Authentication
-
-Zephyr authentication uses JWT tokens generated with a specific algorithm:
-
-```typescript
-// Generate JWT for Zephyr API
-const jwtToken = generateZephyrJwt("GET", apiPath, queryParams);
-```
-
-The JWT generation includes:
-1. Creating a canonical string from the request method, path, and query parameters
-2. Generating a SHA-256 hash of this string
-3. Creating a JWT with claims including the hash, account ID, and timestamps
-4. Signing the JWT with HMAC-SHA256 using the Zephyr Secret Key
 
 ## Data Formatting
 

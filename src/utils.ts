@@ -3,14 +3,16 @@ import fetch from "node-fetch";
 // Helper function to get the internal Jira ID and project ID from a ticket key
 export async function getJiraIssueId(
   ticketKey: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   id?: string;
   projectId?: string;
   errorMessage?: string;
 }> {
-  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/issue/${ticketKey}`;
 
   try {
     const response = await fetch(jiraUrl, {
