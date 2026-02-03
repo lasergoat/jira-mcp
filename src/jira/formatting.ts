@@ -38,17 +38,78 @@ export function formatJiraContent(
       };
 }
 
+// Helper function to parse markdown table to ADF table structure
+function parseMarkdownTable(tableLines: string[]): any {
+  if (tableLines.length === 0) return null;
+
+  const rows: any[] = [];
+
+  for (let i = 0; i < tableLines.length; i++) {
+    const line = tableLines[i].trim();
+
+    // Skip empty lines
+    if (!line) continue;
+
+    // Check if this is a header row (starts with ||)
+    const isHeaderRow = line.startsWith('||');
+
+    // Split cells by | or ||
+    let cells: string[];
+    if (isHeaderRow) {
+      // Header row: split by || but remove empty strings from edges
+      cells = line.split('||').map(cell => cell.trim()).filter(cell => cell !== '');
+    } else {
+      // Data row: split by | but remove empty strings from edges
+      cells = line.split('|').map(cell => cell.trim()).filter(cell => cell !== '');
+    }
+
+    // Skip if no valid cells
+    if (cells.length === 0) continue;
+
+    // Create table cells/headers
+    const rowCells = cells.map(cellText => {
+      const cellType = isHeaderRow ? "tableHeader" : "tableCell";
+      return {
+        type: cellType,
+        attrs: {},
+        content: [
+          {
+            type: "paragraph",
+            content: parseInlineFormatting(cellText)
+          }
+        ]
+      };
+    });
+
+    rows.push({
+      type: "tableRow",
+      content: rowCells
+    });
+  }
+
+  if (rows.length === 0) return null;
+
+  return {
+    type: "table",
+    attrs: {
+      isNumberColumnEnabled: false,
+      layout: "default"
+    },
+    content: rows
+  };
+}
+
 // Helper function to convert enhanced Markdown to Atlassian Document Format (ADF)
 function markdownToADF(markdown: string): any {
   const lines = markdown.split('\n');
   const content: any[] = [];
   let currentList: any = null;
   let i = 0;
-  
+
   while (i < lines.length) {
     const line = lines[i];
     const trimmedLine = line.trim();
-    
+
     // Skip empty lines but close any open lists
     if (!trimmedLine) {
       if (currentList) {
@@ -58,16 +119,47 @@ function markdownToADF(markdown: string): any {
       i++;
       continue;
     }
-    
+
     // Close any open list before processing special blocks
     if (currentList && (
-      trimmedLine.startsWith(':::') || 
-      trimmedLine.startsWith('```') || 
+      trimmedLine.startsWith(':::') ||
+      trimmedLine.startsWith('```') ||
       trimmedLine.startsWith('---') ||
-      trimmedLine.startsWith('@')
+      trimmedLine.startsWith('@') ||
+      trimmedLine.startsWith('||') ||
+      trimmedLine.startsWith('|')
     )) {
       content.push(currentList);
       currentList = null;
+    }
+
+    // Table detection (|| for header row or | for data row)
+    if (trimmedLine.startsWith('||') || (trimmedLine.startsWith('|') && trimmedLine.includes('|'))) {
+      const tableLines: string[] = [];
+
+      // Collect all consecutive table rows
+      while (i < lines.length) {
+        const tableLine = lines[i].trim();
+        if (!tableLine) {
+          // Empty line ends the table
+          break;
+        }
+        if (tableLine.startsWith('||') || (tableLine.startsWith('|') && tableLine.includes('|'))) {
+          tableLines.push(tableLine);
+          i++;
+        } else {
+          // Non-table line ends the table
+          break;
+        }
+      }
+
+      // Parse and add the table
+      const table = parseMarkdownTable(tableLines);
+      if (table) {
+        content.push(table);
+      }
+
+      continue;
     }
     
     // Confluence-style panels {panel:...}
@@ -513,6 +605,210 @@ export function formatDescription(description: string | undefined) {
   }
   
   return markdownToADF(description);
+}
+
+// Helper function to convert ADF content to text with inline marks
+function adfContentToText(content: any[]): string {
+  if (!content || !Array.isArray(content)) return '';
+
+  return content.map(item => {
+    if (item.type === 'text') {
+      let text = item.text || '';
+
+      // Apply marks if present
+      if (item.marks && Array.isArray(item.marks)) {
+        item.marks.forEach((mark: any) => {
+          if (mark.type === 'strong') {
+            text = `**${text}**`;
+          } else if (mark.type === 'em') {
+            text = `*${text}*`;
+          } else if (mark.type === 'code') {
+            text = `\`${text}\``;
+          }
+        });
+      }
+
+      return text;
+    } else if (item.type === 'emoji') {
+      return item.attrs?.text || '';
+    } else if (item.type === 'hardBreak') {
+      return '\n';
+    }
+    return '';
+  }).join('');
+}
+
+// Helper function to convert ADF table to markdown
+function adfTableToMarkdown(tableNode: any): string {
+  if (!tableNode.content || !Array.isArray(tableNode.content)) return '';
+
+  const lines: string[] = [];
+
+  tableNode.content.forEach((row: any) => {
+    if (row.type !== 'tableRow' || !row.content) return;
+
+    const cells: string[] = [];
+    let isHeaderRow = false;
+
+    row.content.forEach((cell: any) => {
+      if (cell.type === 'tableHeader') {
+        isHeaderRow = true;
+      }
+
+      // Extract text from cell content
+      let cellText = '';
+      if (cell.content && Array.isArray(cell.content)) {
+        cellText = cell.content.map((block: any) => {
+          if (block.type === 'paragraph' && block.content) {
+            return adfContentToText(block.content);
+          }
+          return '';
+        }).join(' ').trim();
+      }
+
+      cells.push(cellText);
+    });
+
+    // Format the row
+    if (isHeaderRow) {
+      lines.push('|| ' + cells.join(' || ') + ' ||');
+    } else {
+      lines.push('| ' + cells.join(' | ') + ' |');
+    }
+  });
+
+  return lines.join('\n');
+}
+
+// Helper function to convert ADF to markdown
+export function adfToMarkdown(adfDoc: any): string {
+  if (!adfDoc || !adfDoc.content || !Array.isArray(adfDoc.content)) {
+    return 'No description';
+  }
+
+  const lines: string[] = [];
+
+  adfDoc.content.forEach((block: any) => {
+    switch (block.type) {
+      case 'paragraph':
+        if (block.content) {
+          const text = adfContentToText(block.content);
+          if (text.trim()) {
+            lines.push(text);
+          }
+        }
+        break;
+
+      case 'heading':
+        if (block.content) {
+          const level = block.attrs?.level || 1;
+          const text = adfContentToText(block.content);
+          lines.push('#'.repeat(level) + ' ' + text);
+        }
+        break;
+
+      case 'bulletList':
+        if (block.content && Array.isArray(block.content)) {
+          block.content.forEach((item: any) => {
+            if (item.type === 'listItem' && item.content) {
+              item.content.forEach((para: any) => {
+                if (para.type === 'paragraph' && para.content) {
+                  lines.push('- ' + adfContentToText(para.content));
+                }
+              });
+            }
+          });
+        }
+        break;
+
+      case 'orderedList':
+        if (block.content && Array.isArray(block.content)) {
+          block.content.forEach((item: any, index: number) => {
+            if (item.type === 'listItem' && item.content) {
+              item.content.forEach((para: any) => {
+                if (para.type === 'paragraph' && para.content) {
+                  lines.push(`${index + 1}. ` + adfContentToText(para.content));
+                }
+              });
+            }
+          });
+        }
+        break;
+
+      case 'codeBlock':
+        if (block.content) {
+          const language = block.attrs?.language || '';
+          const code = block.content.map((c: any) => c.text || '').join('');
+          lines.push('```' + language);
+          lines.push(code);
+          lines.push('```');
+        }
+        break;
+
+      case 'panel':
+        const panelType = block.attrs?.panelType || 'info';
+        lines.push(':::' + panelType);
+        if (block.content && Array.isArray(block.content)) {
+          block.content.forEach((para: any) => {
+            if (para.type === 'paragraph' && para.content) {
+              lines.push(adfContentToText(para.content));
+            }
+          });
+        }
+        lines.push(':::');
+        break;
+
+      case 'blockquote':
+        if (block.content && Array.isArray(block.content)) {
+          lines.push(':::quote');
+          block.content.forEach((para: any) => {
+            if (para.type === 'paragraph' && para.content) {
+              lines.push(adfContentToText(para.content));
+            }
+          });
+          lines.push(':::');
+        }
+        break;
+
+      case 'rule':
+        lines.push('---');
+        break;
+
+      case 'table':
+        const tableMarkdown = adfTableToMarkdown(block);
+        if (tableMarkdown) {
+          lines.push(tableMarkdown);
+        }
+        break;
+
+      case 'expand':
+        const title = block.attrs?.title || 'Click to expand';
+        lines.push(':::expand ' + title);
+        if (block.content && Array.isArray(block.content)) {
+          block.content.forEach((para: any) => {
+            if (para.type === 'paragraph' && para.content) {
+              lines.push(adfContentToText(para.content));
+            }
+          });
+        }
+        lines.push(':::');
+        break;
+
+      default:
+        // For unknown types, try to extract text if available
+        if (block.content) {
+          const text = adfContentToText(block.content);
+          if (text.trim()) {
+            lines.push(text);
+          }
+        }
+    }
+
+    // Add blank line after each block for readability
+    lines.push('');
+  });
+
+  return lines.join('\n').trim() || 'No description';
 }
 
 // Helper function to format acceptance criteria for JIRA API v3

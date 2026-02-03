@@ -200,19 +200,25 @@ export async function searchJiraTickets(
   errorMessage?: string;
 }> {
   const host = jiraHost || process.env.JIRA_HOST;
-  const jiraUrl = `https://${host}/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}`;
+  const jiraUrl = `https://${host}/rest/api/3/search/jql`;
 
   console.error("JIRA Search URL:", jiraUrl);
   console.error("JIRA Search JQL:", jql);
   console.error("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
 
+  const requestBody = {
+    jql: jql,
+    maxResults: maxResults
+  };
+
   try {
     const response = await fetch(jiraUrl, {
-      method: "GET",
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Basic ${auth}`,
       },
+      body: JSON.stringify(requestBody),
     });
 
     const responseData = (await response.json()) as JiraSearchResponse;
@@ -251,12 +257,14 @@ export async function searchJiraTickets(
 export async function addJiraComment(
   ticketKey: string,
   comment: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   errorMessage?: string;
 }> {
-  const jiraUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${ticketKey}/comment`;
+  const host = jiraHost || process.env.JIRA_HOST;
+  const jiraUrl = `https://${host}/rest/api/3/issue/${ticketKey}/comment`;
 
   console.error("JIRA Comment URL:", jiraUrl);
   console.error("JIRA Comment:", comment);

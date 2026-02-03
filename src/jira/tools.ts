@@ -4,7 +4,7 @@ import fetch from "node-fetch";
 import { createJiraTicket, createTicketLink, searchJiraTickets, updateJiraTicket, addJiraComment, uploadJiraAttachment, getJiraFields, getJiraTransitions, transitionJiraTicket, getJiraComments, getJiraAttachments, deleteJiraAttachment } from "./api.js";
 import { updateJiraComment, deleteJiraComment, getFullTicketDetails, searchJiraUsers, validateEpic, resolveEpicKey, validateComponents, getProjectComponents, resolveUser, resolveSprintId, validateTicketKey, getErrorSuggestions, getRawTicketData } from "./api-extended.js";
 import { preferencesManager } from "./preferences.js";
-import { formatDescription, formatAcceptanceCriteria } from "./formatting.js";
+import { formatDescription, formatAcceptanceCriteria, adfToMarkdown } from "./formatting.js";
 import { getJiraIssueId } from "../utils.js";
 import { DynamicFieldResolver, extractProjectKey, extractProjectKeyWithDefault } from "../config/helpers.js";
 import { ConfigurationError } from "../config/types.js";
@@ -250,7 +250,7 @@ export function registerJiraTools(server: McpServer) {
         const auth = await getAuth();
         
         // Validate and resolve epic
-        const epicValidation = await validateEpic(parent_epic, auth);
+        const epicValidation = await validateEpic(parent_epic, auth, jiraHost);
         
         if (!epicValidation.success) {
           return {
@@ -465,7 +465,8 @@ export function registerJiraTools(server: McpServer) {
               createdKey, // outward (newly created ticket)
               targetTicket,     // inward (target ticket)
               linkTypeToUse,
-              auth
+              auth,
+              jiraHost
             );
             
             if (linkResult.success) {
@@ -516,7 +517,8 @@ export function registerJiraTools(server: McpServer) {
               createdKey,
               testResult.data.key,
               "Tests",
-              auth
+              auth,
+              jiraHost
             );
 
             if (linkResult.success) {
@@ -829,19 +831,9 @@ export function registerJiraTools(server: McpServer) {
         
         // Format description (handle Atlassian Document Format)
         let description = 'No description';
-        if (fields.description?.content) {
-          // Extract plain text from Atlassian Document Format
-          description = fields.description.content
-            .map((block: any) => {
-              if (block.content) {
-                return block.content
-                  .map((item: any) => item.text || '')
-                  .join('')
-              }
-              return '';
-            })
-            .join('\n')
-            .trim() || 'No description';
+        if (fields.description) {
+          // Convert ADF to markdown (preserves tables and formatting)
+          description = adfToMarkdown(fields.description);
         }
 
         // Get story points dynamically
@@ -878,18 +870,9 @@ ${description}`;
                 
                 // Extract text from ADF body
                 let commentText = 'No content';
-                if (comment.body?.content) {
-                  commentText = comment.body.content
-                    .map((block: any) => {
-                      if (block.type === 'paragraph' && block.content) {
-                        return block.content
-                          .map((item: any) => item.text || '')
-                          .join('');
-                      }
-                      return '';
-                    })
-                    .join('\n')
-                    .trim() || 'No content';
+                if (comment.body) {
+                  // Convert ADF to markdown (preserves tables and formatting)
+                  commentText = adfToMarkdown(comment.body);
                 }
                 
                 formattedOutput += `\n---\n**${author}** - ${created}${updated}\n*Comment ID: ${comment.id}*\n${commentText}`;
@@ -1133,7 +1116,7 @@ ${description}`;
               case 'parent':
                 // Validate epic if parent is being set
                 if (value) {
-                  const epicValidation = await validateEpic(value as string, auth);
+                  const epicValidation = await validateEpic(value as string, auth, jiraHost);
                   
                   if (!epicValidation.success) {
                     return {
@@ -1399,8 +1382,9 @@ ${description}`;
     },
     async ({ ticket_id, comment }) => {
       const auth = await getAuth();
+      const jiraHost = await getJiraHost();
 
-      const result = await addJiraComment(ticket_id, comment, auth);
+      const result = await addJiraComment(ticket_id, comment, auth, jiraHost);
 
       if (!result.success) {
         return {
@@ -1587,7 +1571,7 @@ ${description}`;
 
       // Get project components
       const projectForComponents = resolvedProjectKey || await configManager.getProjectKeyWithFallback();
-      const componentsResult = await getProjectComponents(projectForComponents, auth);
+      const componentsResult = await getProjectComponents(projectForComponents, auth, jiraHost);
       
       let output = `**Project Schema for ${resolvedProjectKey}**\n\n`;
       
@@ -2147,14 +2131,17 @@ This structure helps create professional, scannable tickets that communicate cle
 
         // Sort sprints by state (active first, then future)
         sprintDetails.sort((a, b) => {
-          const stateOrder: { [key: string]: number } = { 'ACTIVE': 0, 'FUTURE': 1, 'CLOSED': 2, 'unknown': 3 };
-          return (stateOrder[a.state] || 3) - (stateOrder[b.state] || 3);
+          const stateOrder: { [key: string]: number } = { 'active': 0, 'future': 1, 'closed': 2, 'unknown': 3 };
+          const aState = (a.state || 'unknown').toLowerCase();
+          const bState = (b.state || 'unknown').toLowerCase();
+          return (stateOrder[aState] || 3) - (stateOrder[bState] || 3);
         });
 
         let output = `**Available Sprints in ${resolvedProjectKey}**\n\n`;
         
         sprintDetails.forEach(sprint => {
-          const stateEmoji = sprint.state === 'ACTIVE' ? '🟢' : sprint.state === 'FUTURE' ? '🔵' : '⚫';
+          const stateLower = (sprint.state || 'unknown').toLowerCase();
+          const stateEmoji = stateLower === 'active' ? '🟢' : stateLower === 'future' ? '🔵' : '⚫';
           output += `${stateEmoji} **${sprint.name}** (ID: ${sprint.id})\n`;
           output += `  State: ${sprint.state}\n`;
           output += `  Dates: ${sprint.startDate} → ${sprint.endDate}\n\n`;
@@ -2528,7 +2515,7 @@ This structure helps create professional, scannable tickets that communicate cle
         const epicLinkField = await fieldResolver.getFieldId('epicLink', 'JIRA_EPIC_LINK_FIELD');
         const epicToUse = sourceFields.parent?.key || (epicLinkField ? sourceFields[epicLinkField] : null);
         if (epicToUse) {
-          const epicValidation = await validateEpic(epicToUse, auth);
+          const epicValidation = await validateEpic(epicToUse, auth, jiraHost);
           if (epicValidation.success && epicValidation.epicKey) {
             // Use modern parent field format
             payload.fields.parent = {
@@ -2621,7 +2608,8 @@ This structure helps create professional, scannable tickets that communicate cle
           createdKey,
           source_ticket,
           linkTypeToUse,
-          auth
+          auth,
+          jiraHost
         );
         
         if (linkResult.success) {

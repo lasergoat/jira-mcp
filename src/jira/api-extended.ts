@@ -1,6 +1,6 @@
 import fetch from "node-fetch";
 import { JiraField, JiraTransition, JiraComment, JiraAttachment, JiraUser } from "./types.js";
-import { formatDescription } from "./formatting.js";
+import { formatDescription, adfToMarkdown } from "./formatting.js";
 import { DynamicFieldResolver } from "../config/helpers.js";
 
 // Helper function to get all fields in a Jira instance
@@ -402,18 +402,9 @@ export async function getFullTicketDetails(
 
     // Get description
     let description = 'No description';
-    if (ticketData.fields.description && ticketData.fields.description.content) {
-      description = ticketData.fields.description.content
-        .map((block: any) => {
-          if (block.content) {
-            return block.content
-              .map((item: any) => item.text || '')
-              .join('');
-          }
-          return '';
-        })
-        .join('\n')
-        .trim() || 'No description';
+    if (ticketData.fields.description) {
+      // Convert ADF to markdown (preserves tables and formatting)
+      description = adfToMarkdown(ticketData.fields.description);
     }
 
     // Get story points - Note: Hardcoded field reference, should be made dynamic
@@ -625,13 +616,19 @@ export async function getCurrentSprint(
   const host = jiraHost || process.env.JIRA_HOST;
   
   try {
-    const searchUrl = `https://${host}/rest/api/3/search?jql=${encodeURIComponent(jql)}&maxResults=10&fields=${sprintField}`;
+    const searchUrl = `https://${host}/rest/api/3/search/jql`;
     
     const response = await fetch(searchUrl, {
-      method: "GET",
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Basic ${auth}`,
       },
+      body: JSON.stringify({
+        jql: jql,
+        maxResults: 10,
+        fields: [sprintField]
+      }),
     });
 
     if (!response.ok) {
@@ -649,7 +646,7 @@ export async function getCurrentSprint(
       for (const issue of data.issues) {
         if (issue.fields[sprintField] && Array.isArray(issue.fields[sprintField])) {
           const activeSprint = issue.fields[sprintField].find((sprint: any) => 
-            sprint.state === 'ACTIVE'
+            sprint.state && sprint.state.toLowerCase() === 'active'
           );
           if (activeSprint) {
             return {
@@ -713,15 +710,19 @@ export async function resolveSprintId(
     const sprintField = await fieldResolver.getFieldId('sprint', 'JIRA_SPRINT_FIELD') || 'customfield_10020';
     
     // Search for tickets in all sprints to find sprint by name
-    const searchUrl = `https://${host}/rest/api/3/search?jql=${encodeURIComponent(
-      `project = "${projectKey}" AND sprint in (openSprints(), futureSprints()) ORDER BY updated DESC`
-    )}&maxResults=50&fields=${sprintField}`;
+    const searchUrl = `https://${host}/rest/api/3/search/jql`;
     
     const response = await fetch(searchUrl, {
-      method: "GET",
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Basic ${auth}`,
       },
+      body: JSON.stringify({
+        jql: `project = "${projectKey}" AND sprint in (openSprints(), futureSprints()) ORDER BY updated DESC`,
+        maxResults: 50,
+        fields: [sprintField]
+      }),
     });
 
     if (!response.ok) {
@@ -811,7 +812,8 @@ export async function resolveSprintId(
 // Helper function to validate that an epic exists
 export async function validateEpic(
   epicInput: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   epicKey?: string;
@@ -819,9 +821,11 @@ export async function validateEpic(
   errorMessage?: string;
 }> {
   try {
+    const host = jiraHost || process.env.JIRA_HOST;
+    
     // If it looks like an epic key (PROJECT-NUMBER), validate it directly
     if (/^[A-Z]+-\d+$/.test(epicInput)) {
-      const ticketUrl = `https://${process.env.JIRA_HOST}/rest/api/3/issue/${epicInput}?fields=summary,issuetype`;
+      const ticketUrl = `https://${host}/rest/api/3/issue/${epicInput}?fields=summary,issuetype`;
       
       const response = await fetch(ticketUrl, {
         method: "GET",
@@ -861,15 +865,19 @@ export async function validateEpic(
     }
     
     // If it doesn't look like a key, search by summary/name
-    const searchUrl = `https://${process.env.JIRA_HOST}/rest/api/3/search?jql=${encodeURIComponent(
-      `issuetype = Epic AND summary ~ "${epicInput}" ORDER BY created DESC`
-    )}&maxResults=5&fields=summary`;
+    const searchUrl = `https://${host}/rest/api/3/search/jql`;
     
     const searchResponse = await fetch(searchUrl, {
-      method: "GET",
+      method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Basic ${auth}`,
       },
+      body: JSON.stringify({
+        jql: `issuetype = Epic AND summary ~ "${epicInput}" ORDER BY created DESC`,
+        maxResults: 5,
+        fields: ["summary"]
+      }),
     });
     
     if (!searchResponse.ok) {
@@ -944,14 +952,16 @@ export async function resolveEpicKey(
 // Helper function to get and validate project components
 export async function getProjectComponents(
   projectKey: string,
-  auth: string
+  auth: string,
+  jiraHost?: string
 ): Promise<{
   success: boolean;
   components?: Array<{ id: string; name: string; description?: string }>;
   errorMessage?: string;
 }> {
   try {
-    const componentsUrl = `https://${process.env.JIRA_HOST}/rest/api/3/project/${projectKey}/components`;
+    const host = jiraHost || process.env.JIRA_HOST;
+    const componentsUrl = `https://${host}/rest/api/3/project/${projectKey}/components`;
     
     const response = await fetch(componentsUrl, {
       method: "GET",
