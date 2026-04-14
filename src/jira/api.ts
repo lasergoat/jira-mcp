@@ -193,7 +193,8 @@ export async function searchJiraTickets(
   jql: string,
   maxResults: number,
   auth: string,
-  jiraHost?: string
+  jiraHost?: string,
+  fields?: string[]
 ): Promise<{
   success: boolean;
   data: JiraSearchResponse;
@@ -206,9 +207,10 @@ export async function searchJiraTickets(
   console.error("JIRA Search JQL:", jql);
   console.error("JIRA Auth:", `Basic ${auth.substring(0, 10)}...`);
 
-  const requestBody = {
+  const requestBody: Record<string, any> = {
     jql: jql,
-    maxResults: maxResults
+    maxResults: maxResults,
+    fields: fields || ["*all"]
   };
 
   try {

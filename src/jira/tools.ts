@@ -2049,33 +2049,34 @@ This structure helps create professional, scannable tickets that communicate cle
   // Search sprints tool - for LLMs to discover sprint IDs
   server.tool(
     "search-sprints",
-    "Search for active and recent sprints to get sprint IDs for ticket assignment. Use this before assigning tickets to sprints.",
+    "Search for active and future sprints to get sprint IDs for ticket assignment. Use this before assigning tickets to sprints.",
     {
+      query: z.string().optional().describe("Optional text to filter sprint names (e.g. 'Sprint 31')"),
       project_key: z.string().optional(),
-      include_future: z.boolean().default(false).describe("Include future sprints in results"),
+      include_closed: z.boolean().default(false).describe("Include closed/past sprints in results"),
       max_results: z.number().min(1).max(20).default(10),
     },
-    async ({ project_key, include_future, max_results }) => {
+    async ({ query, project_key, include_closed, max_results }) => {
       const auth = await getAuth();
       const jiraHost = await getJiraHost();
 
       const resolvedProjectKey = await configManager.getProjectKeyWithFallback(project_key);
-      
-      // Build JQL to find sprints
+
+      // Build JQL to find sprints - always include active and future
       let jql = "";
       if (resolvedProjectKey) {
         jql = `project = "${resolvedProjectKey}"`;
       }
-      
-      // Add sprint state filters
-      if (include_future) {
+
+      // Add sprint state filters - always include active + future, optionally closed
+      if (include_closed) {
         jql += jql ? " AND " : "";
-        jql += "sprint in (openSprints(), futureSprints())";
+        jql += "sprint in (openSprints(), futureSprints(), closedSprints())";
       } else {
         jql += jql ? " AND " : "";
-        jql += "sprint in (openSprints())";
+        jql += "sprint in (openSprints(), futureSprints())";
       }
-      
+
       jql += " ORDER BY updated DESC";
 
       try {
@@ -2120,17 +2121,28 @@ This structure helps create professional, scannable tickets that communicate cle
           });
         }
 
-        if (sprintDetails.length === 0) {
+        // Filter by query string if provided
+        let filteredSprints = sprintDetails;
+        if (query) {
+          const queryLower = query.toLowerCase();
+          filteredSprints = sprintDetails.filter((s: any) =>
+            s.name.toLowerCase().includes(queryLower)
+          );
+        }
+
+        if (filteredSprints.length === 0) {
           return {
             content: [{
               type: "text" as const,
-              text: `No active sprints found in project ${resolvedProjectKey}. This could mean:\n• Project has no active sprints\n• Sprint field mapping needs configuration\n• Project key is incorrect`,
+              text: query
+                ? `No sprints found matching "${query}" in project ${resolvedProjectKey}. Try searching without a query to see all available sprints.`
+                : `No active or future sprints found in project ${resolvedProjectKey}. This could mean:\n• Project has no active sprints\n• Sprint field mapping needs configuration\n• Project key is incorrect`,
             }],
           };
         }
 
         // Sort sprints by state (active first, then future)
-        sprintDetails.sort((a, b) => {
+        filteredSprints.sort((a: any, b: any) => {
           const stateOrder: { [key: string]: number } = { 'active': 0, 'future': 1, 'closed': 2, 'unknown': 3 };
           const aState = (a.state || 'unknown').toLowerCase();
           const bState = (b.state || 'unknown').toLowerCase();
@@ -2138,8 +2150,8 @@ This structure helps create professional, scannable tickets that communicate cle
         });
 
         let output = `**Available Sprints in ${resolvedProjectKey}**\n\n`;
-        
-        sprintDetails.forEach(sprint => {
+
+        filteredSprints.forEach((sprint: any) => {
           const stateLower = (sprint.state || 'unknown').toLowerCase();
           const stateEmoji = stateLower === 'active' ? '🟢' : stateLower === 'future' ? '🔵' : '⚫';
           output += `${stateEmoji} **${sprint.name}** (ID: ${sprint.id})\n`;
@@ -2149,7 +2161,7 @@ This structure helps create professional, scannable tickets that communicate cle
 
         output += `**To assign a ticket to a sprint:**\n`;
         output += `Use the sprint ID (not name) in update-ticket or create-ticket:\n`;
-        output += `Example: \`sprint: "${sprintDetails[0]?.id || 'SPRINT_ID'}"\`\n\n`;
+        output += `Example: \`sprint: "${filteredSprints[0]?.id || 'SPRINT_ID'}"\`\n\n`;
         output += `**Note:** Sprint assignment requires the numeric sprint ID, not the sprint name.`;
 
         return {
